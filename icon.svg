@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#0a0c0f"/>
+  <circle cx="256" cy="240" r="140" fill="none" stroke="#2a303c" stroke-width="12"/>
+  <circle cx="256" cy="240" r="90" fill="none" stroke="#c8965a" stroke-width="8"/>
+  <circle cx="256" cy="240" r="20" fill="#c8965a"/>
+  <line x1="256" y1="240" x2="350" y2="180" stroke="#c8965a" stroke-width="6" stroke-linecap="round"/>
+  <line x1="256" y1="240" x2="200" y2="330" stroke="#5a7fa8" stroke-width="4" stroke-linecap="round"/>
+  <text x="256" y="440" text-anchor="middle" font-family="sans-serif" font-size="72" font-weight="800" fill="#eaedf2">V<tspan fill="#c8965a">M</tspan></text>
+</svg>

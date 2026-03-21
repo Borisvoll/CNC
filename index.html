@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<title>VerspaanMeester — Werkplaats-companion</title>
+<meta name="description" content="CNC en conventioneel verspanen leren door te doen. Werkplaatsopdrachten, rekenmachine, diagnose en naslagwerk voor de Leidse Instrumentmakers School.">
+<meta name="theme-color" content="#0a0c0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{background:#0a0c0f;overflow-y:scroll}
+input,textarea,button{font-family:inherit}
+textarea{font-family:'IBM Plex Sans','Segoe UI',system-ui,sans-serif}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:#12151a}
+::-webkit-scrollbar-thumb{background:#2a303c;border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#353d4d}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+/*
+  VERSPAANMEESTER v3 — Werkplaats-companion
+  
+  Geen quiz-app. Een gereedschap voor aan de machine.
+  
+  Structuur:
+  1. OPDRACHTEN — werkplaatsopdrachten met hypothese→experiment→observatie→conclusie
+  2. LOGBOEK — noteer resultaten, meetwaarden, observaties per opdracht
+  3. REKENMACHINE — snijdata berekenen voor draaien en frezen
+  4. DIAGNOSE — symptoom→oorzaak flowcharts
+  5. NASLAGWERK — formules, parameters, materialen, toleranties
+  
+  Geen externe API calls. Alles lokaal. Persistent storage voor logboek.
+*/
+
+// ====== STORAGE HELPERS ======
+const store = {
+  get(key) {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
+    catch { return null; }
+  },
+  set(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  }
+};
+
+// ====== DESIGN TOKENS ======
+const T = {
+  bg0: "#0a0c0f", bg1: "#12151a", bg2: "#1a1e26", bg3: "#222832",
+  border: "#2a303c", borderLight: "#353d4d",
+  accent: "#c8965a", accentLight: "#daa872", accentDim: "#8a6838",
+  green: "#5a9e6f", greenLight: "#7ab88a",
+  red: "#b85c5c", redLight: "#d47a7a",
+  blue: "#5a7fa8", blueLight: "#7a9ec8",
+  text: "#d0d4dc", textMuted: "#8891a0", textDim: "#5a6272", white: "#eaedf2",
+  mono: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+  body: "'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif",
+  r: 6,
+};
+
+// ====== KNOWLEDGE BASE ======
+
+const MATERIALEN = [
+  { iso: "P", naam: "Staal", kleur: "#5a7fa8", vc_carbide: "200–400", kc: "1500–2500", kenmerken: "Goed bewerkbaar, variabel. Lange spanen mogelijk.", risico: "Spaanbeheersing, BUE bij lage vc" },
+  { iso: "M", naam: "Roestvast", kleur: "#c8965a", vc_carbide: "120–250", kc: "2000–3000", kenmerken: "Werkverharding, BUE, kerfslijtage, hitte.", risico: "Wrijven → verharding → vicieuze cirkel" },
+  { iso: "K", naam: "Gietijzer", kleur: "#b85c5c", vc_carbide: "150–400", kc: "800–1600", kenmerken: "Kortspanig, abrasief. Vaak droog.", risico: "Flank- en kerfslijtage, stof" },
+  { iso: "N", naam: "Non-ferro", kleur: "#5a9e6f", vc_carbide: "300–3000", kc: "400–900", kenmerken: "Lage kracht. Scherp gereedschap vereist.", risico: "Smeren, opgebouwde snijkant" },
+  { iso: "S", naam: "HRSA / Titanium", kleur: "#daa872", vc_carbide: "20–60", kc: "2500–4000", kenmerken: "Extreme hitte, hoge snijkracht.", risico: "Korte standtijd, thermische schade" },
+  { iso: "H", naam: "Gehard staal", kleur: "#9a7ab8", vc_carbide: "80–200", kc: "3000–6000", kenmerken: "CBN vaak vereist. Kan slijpen vervangen.", risico: "Specifieke kwaliteitskeuze nodig" },
+];
+
+const DIAGNOSE = {
+  draaien: [
+    { symptoom: "Lange spanen wikkelen om werkstuk", urgentie: 2, oorzaken: ["fn te laag (wrijven i.p.v. snijden)", "ap te laag (< ⅔ rε)", "Verkeerde chipbreaker geometrie"], acties: ["fn stapsgewijs verhogen (+0.05 mm/omw)", "ap verhogen tot minimaal ⅔ × rε", "Insert met agressievere chipbreaker"], check: "Meet de spaanvorm opnieuw na elke wijziging" },
+    { symptoom: "Ruw / harig oppervlak", urgentie: 2, oorzaken: ["rε te klein voor gekozen fn", "Kerfslijtage op de insert", "Snijkantsopbouw (BUE)", "ap te laag → wrijven"], acties: ["Controleer snijkant onder loep/microscoop", "Grotere rε of wiper-insert", "Verhoog ap tot minimaal ⅔ × rε", "Bij BUE: vc verhogen"], check: "Meet Ra/Rz en vergelijk met tekening-eis" },
+    { symptoom: "Trillingen / chatter", urgentie: 3, oorzaken: ["Uitsteeklengte te lang", "Baarmaat te klein", "Te hoge radiale kracht (rε te groot, kr te laag)", "Opspanning niet stijf genoeg"], acties: ["EERST: kort opspannen of dikker gereedschap", "kr richting 90° (minder radiaal)", "Kleinere rε als finish het toelaat", "Pas DAARNA data aanpassen"], check: "Luister: verdwijnt de toon? Meet: verbetert de maat?" },
+    { symptoom: "Snijkantsopbouw (BUE)", urgentie: 2, oorzaken: ["vc te laag — materiaal plakt", "Verkeerde coating/kwaliteit", "Typisch bij ISO M en N"], acties: ["vc verhogen (meer warmte lost opbouw op)", "Scherpere geometrie kiezen", "Ander grade met gladder coating"], check: "Inspecteer snijkant: zit er materiaal opgebouwd?" },
+    { symptoom: "Maatafwijking / taper", urgentie: 3, oorzaken: ["Gereedschap buigt door (L³ relatie)", "Thermische uitzetting werkstuk", "Slijtage verandert snijkantpositie", "Opspanning verschuift"], acties: ["Meet na eerste snede, corrigeer", "Controleer uitsteeklengte en baarmaat", "Controleer of klauwplaat/center goed vastzit", "Bij taper: slijtage of uitlijning checken"], check: "Meet op 2 posities (voor en achter) met micrometer" },
+  ],
+  frezen: [
+    { symptoom: "Chatter / trillingen", urgentie: 3, oorzaken: ["Tool te lang uitgestoken", "Te grote freesdiameter voor de setup", "Te slappe houder / reductie-adapters", "Te hoge ae of ap"], acties: ["1. Verkort gereedschap", "2. Stijvere houder, geen reductie", "3. Kleinere freesdiameter", "4. Wijdvertand of differentieel vertand", "5. Verlaag ae", "6. Overweeg demping bij >4×D"], check: "Luister: weg is de toon? Voel: minder trillingen op de tafel?" },
+    { symptoom: "Slechte finish vlakfrezen", urgentie: 2, oorzaken: ["fn > 80% van wiper-breedte (bs)", "Axiale uitloop van de frees", "Trillingen (zie boven)"], acties: ["fn verlagen of wiper correct positioneren", "Uitloop meten met klokje op de frees", "Axiale runout moet < 0.01 mm"], check: "Meet Ra. Controleer finish visueel op lichtreflectie." },
+    { symptoom: "Werkstuk tilt / verschuift", urgentie: 3, oorzaken: ["Tegenlopend frezen → krachten omhoog", "Opspankracht onvoldoende", "Te zware snede"], acties: ["Schakel over naar meelopend frezen", "Opspanning controleren en eventueel aandraaien", "ap of ae verlagen"], check: "Controleer opspanning vóór en na de snede" },
+    { symptoom: "Overmatige hitte in sleuf", urgentie: 2, oorzaken: ["ae = volle diameter → maximaal contact", "Onvoldoende koeling/spaanafvoer", "vc te hoog"], acties: ["Trochoidaal frezen (kleine ae, hogere vf)", "Lineair hellend insteken i.p.v. plunge", "Koelmiddel/lucht toevoeren"], check: "Controleer spaankleur: blauw/paars = te heet" },
+  ]
+};
+
+// Werkplaatsopdrachten — de kern van de app
+const OPDRACHTEN = [
+  // ---- DRAAIEN ----
+  { id:"W01", proces:"draaien", titel:"Je eerste bewuste snede",
+    niveau:1, duur:"30 min", machines:["conventioneel","cnc"],
+    doel:"Leer het verband tussen toerental, diameter en snijsnelheid door het zelf te berekenen en in te stellen.",
+    theorie: `De snijsnelheid vc is de snelheid waarmee het materiaal langs de snijkant beweegt. Het is NIET het toerental.
+
+n = (1000 × vc) / (π × Dm)
+
+Bij Ø50 en vc = 200 m/min: n = 1273 omw/min
+Bij Ø25 en vc = 200 m/min: n = 2546 omw/min
+
+Op een conventionele bank kies je een vast toerental.
+Op CNC gebruik je G96 (CSS) — de besturing past n automatisch aan.`,
+    stappen: [
+      { type:"bereken", tekst:"Bereken n voor jouw materiaal en diameter. Gebruik de rekenmachine hieronder.", param:"n" },
+      { type:"hypothese", tekst:"Voorspel: wat verwacht je te horen/zien bij deze snijsnelheid? Schrijf het op." },
+      { type:"uitvoeren", tekst:"Stel de machine in. Maak een snede van 20mm lang, ap = 1mm, fn = 0.15 mm/omw." },
+      { type:"observeer", tekst:"Noteer: spaanvorm, geluid, oppervlak, of het proces rustig of onrustig voelt." },
+      { type:"meet", tekst:"Meet de diameter met micrometer op 2 posities. Noteer beide waarden." },
+      { type:"conclusie", tekst:"Klopt je hypothese? Wat was anders dan verwacht? Waarom?" },
+    ]
+  },
+  { id:"W02", proces:"draaien", titel:"Neusradius en oppervlak",
+    niveau:2, duur:"45 min", machines:["conventioneel","cnc"],
+    doel:"Ontdek experimenteel hoe rε en fn samen de oppervlakteruwheid bepalen.",
+    theorie: `Rmax ≈ 125 × fn² / rε  [µm]
+
+Dit is de THEORETISCHE ruwheid. In de praktijk is het altijd slechter door:
+- trillingen
+- slijtage
+- uitloop
+- thermische effecten
+
+Experiment: twee sneden met verschillende fn, meet het verschil.
+Verwachting: bij dubbele fn wordt Rmax ~4× slechter (fn² relatie).`,
+    stappen: [
+      { type:"bereken", tekst:"Bereken Rmax voor fn=0.1 en fn=0.2 bij jouw rε. Noteer de verwachte waarden." },
+      { type:"hypothese", tekst:"Welke fn geeft beter oppervlak? Hoeveel beter precies? Schrijf je voorspelling op." },
+      { type:"uitvoeren", tekst:"Draai twee zones op hetzelfde werkstuk: zone A met fn=0.1, zone B met fn=0.2. Houd vc en ap gelijk." },
+      { type:"observeer", tekst:"Voel beide zones met je nagel. Zie je verschil in reflectie? Hoor je verschil tijdens het draaien?" },
+      { type:"meet", tekst:"Als beschikbaar: meet Ra/Rz. Anders: vergelijk visueel en tactiel. Noteer je bevinding." },
+      { type:"conclusie", tekst:"Komt het overeen met de formule? Zo niet — welke factor verstoort het? (trilling? slijtage? uitloop?)" },
+    ]
+  },
+  { id:"W03", proces:"draaien", titel:"De stijfheidsproef",
+    niveau:2, duur:"30 min", machines:["conventioneel","cnc"],
+    doel:"Ervaar direct waarom uitsteeklengte en stijfheid je maat en finish bepalen.",
+    theorie: `Doorbuiging ~ L³ / (E × I), met I ~ D⁴
+
+Verdubbel de lengte → 8× meer doorbuiging.
+Verdubbel de diameter → 16× meer stijfheid.
+
+Dit experiment laat je het VOELEN en METEN, niet alleen berekenen.`,
+    stappen: [
+      { type:"hypothese", tekst:"Voorspel: als je een ronde staaf 30mm uit de klauwplaat steekt vs. 80mm — wat verwacht je qua finish en maat?" },
+      { type:"uitvoeren", tekst:"Draai dezelfde as op twee uitsteeklengtes: kort (30mm) en lang (80mm). Zelfde data, zelfde insert." },
+      { type:"observeer", tekst:"Luister naar het verschil in geluid. Voel je trillingen bij de langere uitsteek? Zie je verschil in het oppervlak?" },
+      { type:"meet", tekst:"Meet diameter op beide zones. Is er een verschil? Meet op 2 posities per zone (voor en achter)." },
+      { type:"conclusie", tekst:"Kwantificeer het verschil. Hoeveel µm maatafwijking bij lang vs. kort? Wat zegt dit over je procesgrenzen?" },
+    ]
+  },
+  { id:"W04", proces:"draaien", titel:"Materiaal leren lezen",
+    niveau:2, duur:"20 min per materiaal", machines:["conventioneel","cnc"],
+    doel:"Leer het verschil tussen ISO P en ISO M herkennen aan spanen, geluid en krachten.",
+    theorie: `Elk materiaal heeft een eigen 'persoonlijkheid':
+
+ISO P (staal): regelmatige spanen, voorspelbaar, relatief rustig
+ISO M (roestvast): taaier, meer weerstand, risico op werkverharding
+ISO N (aluminium): licht, snelle spanen, risico op smeren
+
+De spaan vertelt je alles: kleur, vorm, dikte, brekingspatroon.`,
+    stappen: [
+      { type:"hypothese", tekst:"Voorspel per materiaal: welke spaanvorm verwacht je? Welk geluid? Welke krachten op het handwiel?" },
+      { type:"uitvoeren", tekst:"Draai hetzelfde profiel in twee verschillende materialen met dezelfde data. Bewaar de spanen!" },
+      { type:"observeer", tekst:"Vergelijk spanen naast elkaar. Let op: kleur, krulrichting, dikte, breking. Noteer het geluidsverschil." },
+      { type:"meet", tekst:"Meet de finish en maat op beide werkstukken. Is er verschil bij dezelfde data?" },
+      { type:"conclusie", tekst:"Waarom reageert elk materiaal anders? Welke parameter zou je aanpassen per materiaal?" },
+    ]
+  },
+  { id:"W05", proces:"draaien", titel:"CSS vs. vaste RPM",
+    niveau:2, duur:"30 min", machines:["cnc"],
+    doel:"Begrijp het verschil tussen G96 en G97 door het effect te meten bij vlakken.",
+    theorie: `G97 S1500 = vast toerental, 1500 omw/min
+G96 S200 = constante snijsnelheid, 200 m/min
+
+Bij vlakken (van buiten naar centrum) daalt de diameter.
+Met G97: vc daalt mee → aan het centrum wrijf je.
+Met G96: n stijgt automatisch → vc blijft constant.
+
+Altijd G50 Smax instellen als veiligheidsgrens!`,
+    stappen: [
+      { type:"bereken", tekst:"Bereken bij G97 S1500: wat is vc bij Ø50? En bij Ø10? Zie je het probleem?" },
+      { type:"hypothese", tekst:"Voorspel: wat gebeurt er met de finish aan het centrum bij vast toerental?" },
+      { type:"uitvoeren", tekst:"Vlak hetzelfde werkstuk twee keer: eenmaal G97, eenmaal G96. Vergelijk." },
+      { type:"observeer", tekst:"Bekijk het oppervlak van buiten naar centrum. Waar verandert de finish? Noteer." },
+      { type:"conclusie", tekst:"Bij welke diameter werd het probleem zichtbaar? Waarom is CSS essentieel bij vlakken?" },
+    ]
+  },
+  // ---- FREZEN ----
+  { id:"W06", proces:"frezen", titel:"Meelopend vs. tegenlopend",
+    niveau:2, duur:"40 min", machines:["conventioneel","cnc"],
+    doel:"Voel en meet het verschil tussen climb en conventional milling.",
+    theorie: `MEELOPEND: spaan begint dik, eindigt nul. Minder wrijving. Kracht drukt werkstuk IN de opspanning.
+
+TEGENLOPEND: spaan begint nul, wordt dik. Meer wrijving bij intrede. Kracht tilt werkstuk UIT de opspanning.
+
+Op conventioneel: pas op met meelopend als er speling (backlash) in de tafel zit.
+Op CNC: meelopend is standaard, tenzij je een goede reden hebt.`,
+    stappen: [
+      { type:"hypothese", tekst:"Voorspel: welke richting geeft betere finish? Welke voelt rustiger?" },
+      { type:"uitvoeren", tekst:"Frees dezelfde sleuf of vlak twee keer: eenmaal meelopend, eenmaal tegenlopend. Zelfde data." },
+      { type:"observeer", tekst:"Voel je verschil in trillingen via de tafel? Hoor je verschil? Vergelijk de randen en het oppervlak." },
+      { type:"meet", tekst:"Meet de breedte/diepte en oppervlak van beide sneden. Controleer de opspanning na elke snede." },
+      { type:"conclusie", tekst:"Welke conclusies trek je? Wanneer zou je bewust tegenlopend kiezen?" },
+    ]
+  },
+  { id:"W07", proces:"frezen", titel:"Instelhoek experiment",
+    niveau:3, duur:"45 min", machines:["cnc"],
+    doel:"Ontdek hoe kr de krachtenrichting en stabiliteit verandert.",
+    theorie: `kr = 90° → kracht overwegend radiaal (dwars op spil)
+kr = 45° → gebalanceerd axiaal/radiaal
+Ronde plaat → kracht overwegend axiaal (langs spil)
+
+Bij dunwandige werkstukken: 90° (geen axiale kracht op wand)
+Bij lange uitsteeklengte: lage kr (kracht langs spil, niet dwars)
+Allround vlakfrezen: 45°`,
+    stappen: [
+      { type:"hypothese", tekst:"Voorspel: bij welke kr verwacht je het meeste geluid/trillingen op jullie machine? Waarom?" },
+      { type:"uitvoeren", tekst:"Als je toegang hebt tot frezen met verschillende kr: vergelijk op hetzelfde werkstuk. Anders: verander ae bij dezelfde frees." },
+      { type:"observeer", tekst:"Let op: krachtenrichting (welke kant duwt het werkstuk?), geluid, finish." },
+      { type:"conclusie", tekst:"Hoe kies je in de toekomst kr op basis van je werkstuk en setup?" },
+    ]
+  },
+  { id:"W08", proces:"frezen", titel:"Snijdata optimaliseren",
+    niveau:2, duur:"30 min", machines:["conventioneel","cnc"],
+    doel:"Leer systematisch snijdata aanpassen: één variabele tegelijk.",
+    theorie: `De wetenschappelijke methode aan de machine:
+1. Kies een startpunt (fabrikant-aanbeveling of kennisbasis)
+2. Verander ÉÉN parameter
+3. Observeer het effect
+4. Noteer
+5. Trek conclusie
+6. Herhaal
+
+Nooit twee dingen tegelijk veranderen — dan weet je niet wat het effect veroorzaakte.`,
+    stappen: [
+      { type:"bereken", tekst:"Bereken startwaarden voor n, vf op basis van fabrikantdata." },
+      { type:"uitvoeren", tekst:"Maak een referentiesnede met startwaarden. Dit is je nulpunt." },
+      { type:"uitvoeren", tekst:"Verhoog ALLEEN fz met 20%. Maak een tweede snede. Vergelijk." },
+      { type:"observeer", tekst:"Noteer verschil in geluid, finish, spaanvorm. Meet de maat." },
+      { type:"uitvoeren", tekst:"Zet fz terug. Verhoog nu ALLEEN vc met 20%. Derde snede." },
+      { type:"conclusie", tekst:"Welke parameter had meer invloed op finish? Op geluid? Op spaanvorm?" },
+    ]
+  },
+  // ---- METEN ----
+  { id:"W09", proces:"meten", titel:"Meetonzekerheid ontdekken",
+    niveau:1, duur:"20 min", machines:["elk"],
+    doel:"Ontdek dat meten niet 'de waarheid' is maar een benadering met onzekerheid.",
+    theorie: `Meet hetzelfde onderdeel 5× met dezelfde micrometer.
+Je krijgt NIET 5× hetzelfde getal.
+
+Dat verschil is je meetonzekerheid. Het vertelt je:
+- hoeveel je kunt vertrouwen op je meting
+- of een afwijking echt is of meetruis
+- of je meetmethode goed genoeg is voor de tolerantie`,
+    stappen: [
+      { type:"hypothese", tekst:"Voorspel: hoeveel spreiding verwacht je bij 5 metingen met een micrometer op hetzelfde punt?" },
+      { type:"uitvoeren", tekst:"Meet dezelfde maat 5× achter elkaar. Schrijf elk getal op. Leg de micrometer tussendoor neer." },
+      { type:"meet", tekst:"Noteer alle 5 waarden. Bereken het gemiddelde en de spreiding (max − min)." },
+      { type:"uitvoeren", tekst:"Meet nu dezelfde maat met een schuifmaat. Weer 5×. Vergelijk." },
+      { type:"conclusie", tekst:"Welk instrument geeft minder spreiding? Is die spreiding klein genoeg voor jouw tolerantie?" },
+    ]
+  },
+  { id:"W10", proces:"meten", titel:"Tolerantie vertalen naar proces",
+    niveau:2, duur:"30 min", machines:["elk"],
+    doel:"Leer een tolerantie op tekening vertalen naar wat je aan de machine moet doen.",
+    theorie: `Tekening zegt: Ø25 H7 = 25.000 tot 25.021 mm.
+Tolerantieband = 21 µm. Dat is 0.021 mm.
+
+Jouw meetonzekerheid was (uit vorige opdracht): ??? µm.
+Jouw procesafwijking was: ??? µm.
+
+Regel: meetonzekerheid moet < ¼ van de tolerantie.
+Bij H7: meetonzekerheid moet < ~5 µm. Kan dat met je schuifmaat?`,
+    stappen: [
+      { type:"bereken", tekst:"Bereken de tolerantieband van jouw tekeningmaat. Bereken ¼ daarvan." },
+      { type:"hypothese", tekst:"Is jouw meetonzekerheid (uit W09) klein genoeg? Welk meetmiddel heb je nodig?" },
+      { type:"uitvoeren", tekst:"Maak het onderdeel. Meet met het juiste meetmiddel. Noteer de afwijking t.o.v. nominaal." },
+      { type:"meet", tekst:"Valt de maat binnen tolerantie? Hoeveel marge heb je?" },
+      { type:"conclusie", tekst:"Wat is je procescapability? Kun je deze tolerantie herhaalbaar halen?" },
+    ]
+  },
+  // ---- CNC FANUC/MAZAK ----
+  { id:"W11", proces:"cnc", titel:"G-code anatomie: Fanuc",
+    niveau:2, duur:"45 min", machines:["cnc"],
+    doel:"Begrijp de structuur van een Fanuc-programma door het met de hand te lezen en te voorspellen wat de machine doet.",
+    theorie: `Een Fanuc CNC-programma is opgebouwd uit blokken:
+
+O0001 (PROGRAMMANAAM)
+N10 G21 G40 G99         ← metrisch, compensatie uit, voeding/omw
+N20 T0101               ← gereedschap 1, offset 1
+N30 G96 S200 M03        ← CSS 200 m/min, spil aan rechtsom
+N40 G50 S3000           ← max toerental veiligheid
+N50 G00 X52.0 Z2.0      ← snelgang naar startpositie
+N60 G01 X50.0 F0.15     ← lineair naar Ø50, fn=0.15
+N70 G01 Z-30.0          ← langsdraaien 30mm
+N80 G00 X55.0           ← retract radiaal
+N90 G00 Z2.0            ← retract axiaal
+N100 M30                ← programma einde
+
+Lees dit alsof het een recept is. Elke regel doet precies één ding.`,
+    stappen: [
+      { type:"hypothese", tekst:"Lees het voorbeeldprogramma hierboven. Teken op papier wat de machine gaat doen. Welke contour ontstaat er?" },
+      { type:"uitvoeren", tekst:"Voer het programma in op de besturing (of simulator). Zet op single block en stap regel voor regel door." },
+      { type:"observeer", tekst:"Klopt je tekening met wat de machine doet? Waar in het programma verandert de richting? Waar is de snelgang vs. voedingsgang?" },
+      { type:"bereken", tekst:"Bereken: bij G96 S200 en X50 (Ø50) — wat is het toerental? En bij X10 (Ø10) — wat wordt het dan? Waarom staat G50 S3000 erbij?" },
+      { type:"conclusie", tekst:"Schrijf in je eigen woorden op wat elke G-code doet. G00, G01, G96, G97, G50, G40, G99." },
+    ]
+  },
+  { id:"W12", proces:"cnc", titel:"Gereedschapsoffsets begrijpen",
+    niveau:2, duur:"30 min", machines:["cnc"],
+    doel:"Begrijp hoe wear offsets en geometry offsets werken en waarom ze je maat bepalen.",
+    theorie: `De CNC weet niet waar je snijkant zit. Dat vertel je via offsets.
+
+GEOMETRY OFFSET: de afstand van referentiepunt naar de snijkant.
+Dit stel je in bij het gereedschap meten (touchen/presetten).
+
+WEAR OFFSET: een kleine correctie bovenop de geometry offset.
+Dit pas je aan op basis van je MEETRESULTAAT.
+
+Voorbeeld: je draait Ø25.000 maar meet Ø25.032.
+Afwijking = +0.032 op diameter = +0.016 op radius.
+Je past wear offset X aan met -0.016.
+
+Fanuc: offset-pagina → geometry vs. wear
+Mazak: tool data → geometry + wear (soms gecombineerd)
+
+De offset is je fijnregelaar. Niet het programma aanpassen — de offset.`,
+    stappen: [
+      { type:"bereken", tekst:"Je meet Ø24.970 terwijl je Ø25.000 wilt. Hoeveel en welke kant moet je wear offset X corrigeren?" },
+      { type:"hypothese", tekst:"Als je wear offset X met -0.010 aanpast, wat verwacht je dan als nieuwe maat? (Let op: X is diameter of radius, afhankelijk van de besturing!)" },
+      { type:"uitvoeren", tekst:"Maak een testsnede. Meet. Bereken de correctie. Voer de wear offset in. Maak opnieuw een snede. Meet." },
+      { type:"meet", tekst:"Noteer: maat vóór correctie, berekende correctie, ingevoerde offset, maat ná correctie." },
+      { type:"conclusie", tekst:"Klopt de correctie? Zo niet: heb je radius vs. diameter goed begrepen? Hoeveel iteraties had je nodig?" },
+    ]
+  },
+  { id:"W13", proces:"cnc", titel:"Mazatrol vs. G-code denken",
+    niveau:3, duur:"45 min", machines:["cnc"],
+    doel:"Begrijp het verschil tussen conversational programming (Mazatrol) en G-code — en wanneer je welke gebruikt.",
+    theorie: `Mazak heeft twee werelden:
+
+MAZATROL (conversational):
+- Je vult parameters in via menu's
+- De besturing genereert het gereedschapspad
+- Snel voor standaardvormen
+- Je ziet niet precies wat de machine gaat doen
+
+EIA/ISO (G-code):
+- Jij schrijft elke beweging
+- Volledige controle over pad, strategie, volgorde
+- Meer werk, maar je weet precies wat er gebeurt
+- Noodzakelijk bij complexe contouren of speciale strategieën
+
+Op de LiS leer je BEIDE. Mazatrol voor productiviteit, G-code voor begrip.
+Een goede verspaaner kan altijd teruggrijpen op G-code als Mazatrol niet doet wat je wilt.`,
+    stappen: [
+      { type:"uitvoeren", tekst:"Programmeer hetzelfde werkstuk in Mazatrol EN in G-code. Bijvoorbeeld: een trapas met 3 verschillende diameters." },
+      { type:"observeer", tekst:"Vergelijk: welke methode was sneller? Bij welke begreep je beter wat de machine gaat doen?" },
+      { type:"hypothese", tekst:"Voorspel: als je een speciale insteekvorm nodig hebt (bv. een groef met specifieke bodemradius) — kan Mazatrol dat? Wanneer MOET je naar G-code?" },
+      { type:"conclusie", tekst:"Schrijf op: wanneer kies je Mazatrol? Wanneer G-code? Wat zijn de grenzen van elk?" },
+    ]
+  },
+  // ---- OPSPANNING ----
+  { id:"W14", proces:"opspanning", titel:"Klokken en uitlijnen",
+    niveau:2, duur:"30 min", machines:["conventioneel","cnc"],
+    doel:"Leer een werkstuk uitlijnen met een klok en statief — de basis van nauwkeurig werken.",
+    theorie: `Een werkstuk dat scheef zit geeft:
+- maatfouten (taper, ovaal)
+- ongelijke snedediepte
+- eenzijdige slijtage
+- risico op loslopen
+
+Klokken = het werkstuk roteren terwijl je met een meetklok de slingering afleest.
+Doel: slingering minimaliseren door het werkstuk te tikken/verschuiven in de klauwplaat.
+
+Bij een 3-klauwplaat: de nauwkeurigheid is beperkt door de plaat zelf (~0.02-0.05 mm TIR).
+Bij een 4-klauwplaat of spantang: je kunt nauwkeuriger uitlijnen.`,
+    stappen: [
+      { type:"hypothese", tekst:"Hoeveel slingering verwacht je op jullie 3-klauwplaat? En op een 4-klauwplaat of spantang?" },
+      { type:"uitvoeren", tekst:"Span een werkstuk. Zet een klokje op het oppervlak. Roteer met de hand. Lees de maximale slingering af." },
+      { type:"meet", tekst:"Noteer de TIR (Total Indicator Reading). Probeer het werkstuk te corrigeren en meet opnieuw." },
+      { type:"observeer", tekst:"Waar is het makkelijk om nauwkeurig te krijgen? Waar niet? Wat is de limiet van je opspanmethode?" },
+      { type:"conclusie", tekst:"Wat is de minimale TIR die je kunt halen? Is dat goed genoeg voor je tolerantie-eis?" },
+    ]
+  },
+  // ---- GECOMBINEERD PROJECT ----
+  { id:"W15", proces:"project", titel:"Complete as: tekening → product",
+    niveau:3, duur:"2-3 uur", machines:["cnc"],
+    doel:"Maak een complete as van tekening tot gemeten eindproduct. Combineer alles wat je geleerd hebt.",
+    theorie: `Dit is de integratieproef. Je combineert:
+- tekening lezen (toleranties, passingen, Ra-eisen)
+- materiaal kiezen en snijdata berekenen
+- opspanning plannen
+- CNC-programma schrijven of Mazatrol-programma maken
+- proces uitvoeren
+- meten en corrigeren
+- documenteren
+
+Werkstuk: een getrapte as met:
+- Ø25 h6 × 20mm (lagerpassing)
+- Ø30 vrij × 15mm (overgang)
+- Ø20 met Ra 1.6 × 25mm (afdichtvlak)
+- M16×2 buitendraad × 15mm
+
+Materiaal: C45 (ISO P) of wat beschikbaar is.
+Tolerantie: h6 op Ø25 = 25.000 tot 24.987 mm.`,
+    stappen: [
+      { type:"bereken", tekst:"Bereken ALLE snijdata: n, vf/fn voor ruwen en finishen van elke sectie. Bereken verwachte Rmax voor de Ra 1.6 eis." },
+      { type:"hypothese", tekst:"Plan je bewerkingsvolgorde. Welke diameter eerst? Waarom? Hoe span je op? Hoeveel opspanningen heb je nodig?" },
+      { type:"uitvoeren", tekst:"Schrijf het programma (G-code of Mazatrol). Voer uit met een proefsnede op de grootste diameter. Meet. Corrigeer offsets." },
+      { type:"meet", tekst:"Meet ELKE kritische maat na bewerking. Noteer: Ø25 (met micrometer, 2 posities), Ø20 oppervlak (visueel/Ra), M16 draad (met ring/plugkaliber)." },
+      { type:"observeer", tekst:"Waar liep het proces soepel? Waar moest je ingrijpen? Welke parameter was het lastigst te beheersen?" },
+      { type:"conclusie", tekst:"Evalueer: alle maten binnen tolerantie? Zo niet: waar ging het mis en wat zou je volgende keer anders doen? Dit IS procesbeheersing." },
+    ]
+  },
+];
+
+// ====== MAIN APP ======
+function App() {
+  const [tab, setTab] = useState("opdrachten");
+  const [selOpdracht, setSelOpdracht] = useState(null);
+  const [logboek, setLogboek] = useState({});
+  const [diagProces, setDiagProces] = useState("draaien");
+  const [diagOpen, setDiagOpen] = useState(null);
+  const [calcProc, setCalcProc] = useState("draaien");
+  const [calcVals, setCalcVals] = useState({});
+  const [naslagTab, setNaslagTab] = useState("formules");
+  const [filterProces, setFilterProces] = useState("all");
+
+  // Load logboek
+  useEffect(() => {
+    const d = store.get("vm3-logboek"); if (d) setLogboek(d);
+  }, []);
+
+  const saveLog = useCallback((opdId, stapIdx, value) => {
+    setLogboek(prev => {
+      const next = { ...prev, [opdId]: { ...(prev[opdId] || {}), [stapIdx]: value, lastUpdate: Date.now() } };
+      store.set("vm3-logboek", next);
+      return next;
+    });
+  }, []);
+
+  const completedCount = OPDRACHTEN.filter(o => {
+    const log = logboek[o.id];
+    return log && o.stappen.every((_, i) => log[i] && log[i].trim());
+  }).length;
+
+  // ====== STYLES ======
+  const S = {
+    app: { minHeight: "100vh", background: T.bg0, color: T.text, fontFamily: T.body },
+    header: { background: T.bg1, borderBottom: `1px solid ${T.border}`, padding: "12px 16px", position: "sticky", top: 0, zIndex: 100 },
+    content: { maxWidth: 640, margin: "0 auto", padding: "0 12px 80px" },
+    tabs: { display: "flex", background: T.bg1, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 52, zIndex: 99, overflowX: "auto" },
+    tab: (active) => ({ padding: "10px 16px", border: "none", borderBottom: active ? `2px solid ${T.accent}` : "2px solid transparent", background: "none", color: active ? T.accent : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontFamily: T.body }),
+    card: { background: T.bg2, border: `1px solid ${T.border}`, borderRadius: T.r, padding: "14px 16px", marginBottom: 8 },
+    btn: (primary) => ({ background: primary ? T.accent : T.bg3, color: primary ? T.bg0 : T.text, border: `1px solid ${primary ? T.accent : T.border}`, borderRadius: T.r, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: T.body }),
+    input: { background: T.bg1, border: `1px solid ${T.border}`, borderRadius: T.r, color: T.white, padding: "8px 12px", fontSize: 13, fontFamily: T.mono, outline: "none", width: "100%" },
+    label: { color: T.textMuted, fontSize: 11, fontFamily: T.mono, letterSpacing: 0.5 },
+    mono: { fontFamily: T.mono, color: T.accent },
+  };
+
+  // ====== TAB: OPDRACHTEN ======
+  const renderOpdrachten = () => {
+    if (selOpdracht) return renderOpdrachtDetail(selOpdracht);
+
+    const filtered = OPDRACHTEN.filter(o => filterProces === "all" || o.proces === filterProces);
+    return (
+      <div style={{ padding: "12px 0" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          {[{ k: "all", l: "Alle" }, { k: "draaien", l: "Draaien" }, { k: "frezen", l: "Frezen" }, { k: "cnc", l: "CNC" }, { k: "meten", l: "Meten" }, { k: "opspanning", l: "Opspanning" }, { k: "project", l: "Project" }].map(f => (
+            <button key={f.k} onClick={() => setFilterProces(f.k)}
+              style={{ padding: "5px 14px", borderRadius: 14, border: `1px solid ${filterProces === f.k ? T.accent : T.border}`, background: filterProces === f.k ? T.accentDim + "30" : "none", color: filterProces === f.k ? T.accent : T.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+              {f.l}
+            </button>
+          ))}
+          <span style={{ marginLeft: "auto", ...S.label, alignSelf: "center" }}>{completedCount}/{OPDRACHTEN.length} afgerond</span>
+        </div>
+
+        {filtered.map(o => {
+          const log = logboek[o.id] || {};
+          const filled = o.stappen.filter((_, i) => log[i] && log[i].trim()).length;
+          const pct = Math.round((filled / o.stappen.length) * 100);
+          const done = pct === 100;
+          return (
+            <button key={o.id} onClick={() => setSelOpdracht(o)} style={{ ...S.card, cursor: "pointer", width: "100%", textAlign: "left", display: "block", transition: "border-color 0.15s", borderColor: done ? T.green + "60" : T.border }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = T.accent}
+              onMouseLeave={e => e.currentTarget.style.borderColor = done ? T.green + "60" : T.border}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 3 }}>
+                    <span style={{ ...S.label, color: o.proces === "draaien" ? T.blue : o.proces === "frezen" ? T.accent : T.green }}>{o.proces.toUpperCase()}</span>
+                    <span style={{ ...S.label }}>Niv. {o.niveau}</span>
+                    <span style={{ ...S.label }}>{o.duur}</span>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: done ? T.green : T.white }}>{done ? "✓ " : ""}{o.titel}</div>
+                </div>
+                {pct > 0 && pct < 100 && (
+                  <span style={{ ...S.label, color: T.accent }}>{pct}%</span>
+                )}
+              </div>
+              <p style={{ color: T.textMuted, fontSize: 12, margin: 0, lineHeight: 1.4 }}>{o.doel}</p>
+              {pct > 0 && (
+                <div style={{ marginTop: 8, background: T.bg1, borderRadius: 3, height: 3, overflow: "hidden" }}>
+                  <div style={{ background: done ? T.green : T.accent, height: "100%", width: `${pct}%`, transition: "width 0.3s" }} />
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ====== OPDRACHT DETAIL ======
+  const renderOpdrachtDetail = (o) => {
+    const log = logboek[o.id] || {};
+    const stepIcons = { bereken: "⊕", hypothese: "?", uitvoeren: "▶", observeer: "◉", meet: "△", conclusie: "=" };
+    const stepLabels = { bereken: "BEREKEN", hypothese: "HYPOTHESE", uitvoeren: "UITVOEREN", observeer: "OBSERVEER", meet: "MEET", conclusie: "CONCLUSIE" };
+    const stepColors = { bereken: T.blue, hypothese: T.accent, uitvoeren: T.white, observeer: T.accentLight, meet: T.green, conclusie: T.blueLight };
+
+    return (
+      <div style={{ padding: "12px 0" }}>
+        <button onClick={() => setSelOpdracht(null)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", fontSize: 12, marginBottom: 12, padding: 0 }}>← alle opdrachten</button>
+
+        <div style={{ ...S.card, borderLeft: `3px solid ${T.accent}` }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+            <span style={{ ...S.label, color: o.proces === "draaien" ? T.blue : o.proces === "frezen" ? T.accent : T.green }}>{o.proces.toUpperCase()}</span>
+            <span style={{ ...S.label }}>Niveau {o.niveau} · {o.duur}</span>
+            <span style={{ ...S.label }}>Machines: {o.machines.join(", ")}</span>
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: T.white, margin: "4px 0" }}>{o.titel}</h2>
+          <p style={{ color: T.textMuted, fontSize: 13, margin: "4px 0 0", lineHeight: 1.4 }}>{o.doel}</p>
+        </div>
+
+        {/* Theorie blok */}
+        <div style={{ ...S.card, background: T.bg1, borderLeft: `3px solid ${T.blueLight}` }}>
+          <div style={{ ...S.label, color: T.blueLight, marginBottom: 6 }}>THEORIE</div>
+          <pre style={{ color: T.text, fontSize: 12, lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap", fontFamily: T.body }}>{o.theorie}</pre>
+        </div>
+
+        {/* Stappen met logboek */}
+        {o.stappen.map((stap, i) => (
+          <div key={i} style={{ ...S.card, borderLeft: `3px solid ${stepColors[stap.type] || T.border}` }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontFamily: T.mono, fontSize: 16, color: stepColors[stap.type] }}>{stepIcons[stap.type]}</span>
+              <span style={{ ...S.label, color: stepColors[stap.type] }}>STAP {i + 1} — {stepLabels[stap.type]}</span>
+            </div>
+            <p style={{ color: T.text, fontSize: 13, lineHeight: 1.5, margin: "0 0 10px" }}>{stap.tekst}</p>
+
+            <textarea
+              value={log[i] || ""}
+              onChange={e => saveLog(o.id, i, e.target.value)}
+              placeholder={stap.type === "hypothese" ? "Schrijf je voorspelling..." : stap.type === "meet" ? "Noteer je meetwaarden..." : stap.type === "conclusie" ? "Wat heb je geleerd?" : "Noteer je observaties..."}
+              rows={3}
+              style={{ ...S.input, resize: "vertical", fontFamily: T.body, fontSize: 12, lineHeight: 1.5, minHeight: 60 }}
+            />
+            {log[i] && log[i].trim() && (
+              <div style={{ color: T.green, fontSize: 10, marginTop: 4, fontFamily: T.mono }}>✓ vastgelegd</div>
+            )}
+          </div>
+        ))}
+
+        {/* Samenvatting */}
+        {o.stappen.every((_, i) => log[i] && log[i].trim()) && (
+          <div style={{ ...S.card, background: T.green + "15", borderLeft: `3px solid ${T.green}` }}>
+            <div style={{ color: T.green, fontSize: 14, fontWeight: 700 }}>✓ Opdracht compleet</div>
+            <p style={{ color: T.textMuted, fontSize: 12, margin: "4px 0 0" }}>
+              Je logboek is opgeslagen. Kom hier terug om je notities te vergelijken met latere experimenten.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ====== TAB: REKENMACHINE ======
+  const renderCalc = () => {
+    const v = calcVals;
+    const set = (k, val) => setCalcVals({ ...v, [k]: val });
+    const num = (k) => parseFloat(v[k]) || 0;
+
+    const results_draaien = {
+      n: num("vc") && num("Dm") ? ((1000 * num("vc")) / (Math.PI * num("Dm"))) : null,
+      vf: null, Q: null, Rmax: null, Pc: null,
+    };
+    if (results_draaien.n) results_draaien.vf = num("fn") ? num("fn") * results_draaien.n : null;
+    results_draaien.Q = num("ap") && num("fn") && num("vc") ? num("ap") * num("fn") * num("vc") : null;
+    results_draaien.Rmax = num("fn") && num("re") ? (125 * num("fn") * num("fn") / num("re")) : null;
+    results_draaien.Pc = num("vc") && num("ap") && num("fn") && num("kc") ? (num("vc") * num("ap") * num("fn") * num("kc")) / 60000 : null;
+
+    const n_f = num("vc") && num("Dc") ? (1000 * num("vc")) / (Math.PI * num("Dc")) : null;
+    const vf_f = num("fz") && n_f && num("zc") ? num("fz") * n_f * num("zc") : null;
+    const results_frezen = {
+      n: n_f,
+      vf: vf_f,
+      Q: num("ap") && num("ae") && vf_f ? (num("ap") * num("ae") * vf_f) / 1000 : null,
+      Pc: num("ap") && num("ae") && vf_f && num("kc") ? (num("ap") * num("ae") * vf_f * num("kc")) / 60e6 : null,
+      Mc: null,
+    };
+    if (results_frezen.Pc && n_f) results_frezen.Mc = (results_frezen.Pc * 30000) / (Math.PI * n_f);
+
+    const inp = (label, key, unit, ph) => (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+        <label style={{ width: 36, ...S.label, textAlign: "right" }}>{label}</label>
+        <input type="number" step="any" value={v[key] || ""} onChange={e => set(key, e.target.value)}
+          placeholder={ph} style={{ ...S.input, flex: 1, width: "auto" }} />
+        <span style={{ ...S.label, width: 52 }}>{unit}</span>
+      </div>
+    );
+
+    const res = (label, val, unit) => (
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 10px", background: T.bg1, borderRadius: T.r, marginBottom: 3 }}>
+        <span style={{ color: T.textMuted, fontSize: 12 }}>{label}</span>
+        <span style={{ color: val !== null ? T.accent : T.textDim, fontWeight: 700, fontSize: 14, fontFamily: T.mono }}>
+          {val !== null ? (typeof val === "number" ? val.toFixed(val > 100 ? 0 : val > 1 ? 1 : 2) : val) : "—"} <span style={{ fontSize: 10, color: T.textMuted }}>{unit}</span>
+        </span>
+      </div>
+    );
+
+    return (
+      <div style={{ padding: "12px 0" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+          {["draaien", "frezen"].map(p => (
+            <button key={p} onClick={() => { setCalcProc(p); setCalcVals({}); }}
+              style={{ ...S.btn(calcProc === p), flex: 1, fontSize: 12 }}>
+              {p === "draaien" ? "Draaien" : "Frezen"}
+            </button>
+          ))}
+        </div>
+
+        <div style={S.card}>
+          <div style={{ ...S.label, marginBottom: 10 }}>INVOER</div>
+          {calcProc === "draaien" ? <>
+            {inp("vc", "vc", "m/min", "snijsnelheid")}
+            {inp("Dm", "Dm", "mm", "diameter")}
+            {inp("fn", "fn", "mm/omw", "voeding")}
+            {inp("ap", "ap", "mm", "snedediepte")}
+            {inp("rε", "re", "mm", "neusradius")}
+            {inp("kc", "kc", "N/mm²", "spec. snijkracht")}
+          </> : <>
+            {inp("vc", "vc", "m/min", "snijsnelheid")}
+            {inp("Dc", "Dc", "mm", "freesdiameter")}
+            {inp("fz", "fz", "mm/tand", "voeding/tand")}
+            {inp("zc", "zc", "tanden", "aantal tanden")}
+            {inp("ap", "ap", "mm", "snedediepte")}
+            {inp("ae", "ae", "mm", "radiale insnijding")}
+            {inp("kc", "kc", "N/mm²", "spec. snijkracht")}
+          </>}
+        </div>
+
+        <div style={S.card}>
+          <div style={{ ...S.label, marginBottom: 10 }}>RESULTAAT</div>
+          {calcProc === "draaien" ? <>
+            {res("Toerental n", results_draaien.n, "omw/min")}
+            {res("Tafelvoeding vf", results_draaien.vf, "mm/min")}
+            {res("Materiaalafname Q", results_draaien.Q, "cm³/min")}
+            {res("Ruwheid Rmax", results_draaien.Rmax, "µm")}
+            {res("Vermogen Pc", results_draaien.Pc, "kW")}
+          </> : <>
+            {res("Toerental n", results_frezen.n, "omw/min")}
+            {res("Tafelvoeding vf", results_frezen.vf, "mm/min")}
+            {res("Materiaalafname Q", results_frezen.Q, "cm³/min")}
+            {res("Vermogen Pc", results_frezen.Pc, "kW")}
+            {res("Moment Mc", results_frezen.Mc, "Nm")}
+          </>}
+        </div>
+
+        {/* Quick reference */}
+        <div style={{ ...S.card, background: T.bg1 }}>
+          <div style={{ ...S.label, marginBottom: 8 }}>MATERIAAL SNELSTART</div>
+          {MATERIALEN.map(m => (
+            <button key={m.iso} onClick={() => set("kc", m.kc.split("–")[0])}
+              style={{ display: "flex", justifyContent: "space-between", width: "100%", padding: "5px 8px", background: "none", border: "none", cursor: "pointer", borderRadius: 4, color: T.text, fontSize: 11 }}
+              onMouseEnter={e => e.currentTarget.style.background = T.bg3}
+              onMouseLeave={e => e.currentTarget.style.background = "none"}>
+              <span><span style={{ color: m.kleur, fontWeight: 700, fontFamily: T.mono }}>ISO {m.iso}</span> {m.naam}</span>
+              <span style={{ color: T.textDim }}>vc {m.vc_carbide} · kc {m.kc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // ====== TAB: DIAGNOSE ======
+  const renderDiagnose = () => {
+    const data = DIAGNOSE[diagProces] || [];
+    return (
+      <div style={{ padding: "12px 0" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+          {["draaien", "frezen"].map(p => (
+            <button key={p} onClick={() => { setDiagProces(p); setDiagOpen(null); }}
+              style={{ ...S.btn(diagProces === p), flex: 1, fontSize: 12 }}>
+              {p === "draaien" ? "Draaien" : "Frezen"}
+            </button>
+          ))}
+        </div>
+        <p style={{ color: T.textMuted, fontSize: 12, margin: "0 0 12px" }}>
+          Wat zie/hoor/voel je? Klik op het symptoom.
+        </p>
+        {data.map((d, i) => (
+          <div key={i} style={{ marginBottom: diagOpen === i ? 2 : 6 }}>
+            <button onClick={() => setDiagOpen(diagOpen === i ? null : i)}
+              style={{ ...S.card, cursor: "pointer", width: "100%", textAlign: "left", marginBottom: 0, borderColor: diagOpen === i ? T.accent : T.border, borderBottomLeftRadius: diagOpen === i ? 0 : T.r, borderBottomRightRadius: diagOpen === i ? 0 : T.r }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ color: T.white, fontSize: 14, fontWeight: 600 }}>{d.symptoom}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, fontFamily: T.mono, background: d.urgentie === 3 ? T.red + "25" : T.accent + "25", color: d.urgentie === 3 ? T.red : T.accent }}>
+                  {d.urgentie === 3 ? "STOP & FIX" : "AANDACHT"}
+                </span>
+              </div>
+            </button>
+            {diagOpen === i && (
+              <div style={{ background: T.bg1, border: `1px solid ${T.accent}`, borderTop: "none", borderRadius: `0 0 ${T.r}px ${T.r}px`, padding: 14 }}>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ ...S.label, color: T.red, marginBottom: 5 }}>MOGELIJKE OORZAKEN</div>
+                  {d.oorzaken.map((o, j) => <div key={j} style={{ color: T.text, fontSize: 12, padding: "2px 0", paddingLeft: 12, position: "relative" }}><span style={{ position: "absolute", left: 0, color: T.textDim }}>·</span>{o}</div>)}
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ ...S.label, color: T.green, marginBottom: 5 }}>ACTIES (IN VOLGORDE)</div>
+                  {d.acties.map((a, j) => <div key={j} style={{ color: T.text, fontSize: 12, padding: "2px 0", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: T.green, fontFamily: T.mono, fontSize: 10 }}>{j + 1}.</span>{a}</div>)}
+                </div>
+                <div style={{ background: T.bg2, borderRadius: T.r, padding: "8px 12px", borderLeft: `2px solid ${T.blueLight}` }}>
+                  <div style={{ ...S.label, color: T.blueLight, marginBottom: 2 }}>VERIFICATIE</div>
+                  <div style={{ color: T.text, fontSize: 12 }}>{d.check}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // ====== TAB: NASLAGWERK ======
+  const renderNaslag = () => (
+    <div style={{ padding: "12px 0" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {[{ k: "formules", l: "Formules" }, { k: "params", l: "Parameters" }, { k: "materialen", l: "Materialen" }, { k: "toleranties", l: "Toleranties" }, { k: "gcode", l: "G-code" }].map(f => (
+          <button key={f.k} onClick={() => setNaslagTab(f.k)}
+            style={{ padding: "5px 14px", borderRadius: 14, border: `1px solid ${naslagTab === f.k ? T.accent : T.border}`, background: naslagTab === f.k ? T.accentDim + "30" : "none", color: naslagTab === f.k ? T.accent : T.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+            {f.l}
+          </button>
+        ))}
+      </div>
+
+      {naslagTab === "formules" && (
+        <>
+          {[{ proc: "DRAAIEN", formules: [
+            "vc = (π × Dm × n) / 1000          [m/min]",
+            "n = (1000 × vc) / (π × Dm)         [omw/min]",
+            "vf = fn × n                          [mm/min]",
+            "Q = ap × fn × vc                    [cm³/min]",
+            "Pc = (vc × ap × fn × kc) / 60000   [kW]",
+            "Rmax ≈ 125 × fn² / rε               [µm]",
+          ]}, { proc: "FREZEN", formules: [
+            "vc = (π × Dcap × n) / 1000          [m/min]",
+            "n = (1000 × vc) / (π × Dcap)        [omw/min]",
+            "vf = fz × n × zc                    [mm/min]",
+            "Q = (ap × ae × vf) / 1000           [cm³/min]",
+            "Pc = (ap × ae × vf × kc) / 60·10⁶  [kW]",
+            "Mc = (Pc × 30000) / (π × n)         [Nm]",
+          ]}, { proc: "BOREN", formules: [
+            "vc = (π × Dc × n) / 1000            [m/min]",
+            "vf = fn × n                          [mm/min]",
+            "Q = (Dc × fn × vc) / 4              [cm³/min]",
+            "Ff ≈ 0.5 × Dc × fn × kc × sin(kr)  [N]",
+          ]}].map(s => (
+            <div key={s.proc} style={S.card}>
+              <div style={{ ...S.label, color: T.accent, marginBottom: 8 }}>{s.proc}</div>
+              {s.formules.map((f, i) => (
+                <div key={i} style={{ fontFamily: T.mono, fontSize: 12, color: T.text, padding: "4px 0", lineHeight: 1.4 }}>{f}</div>
+              ))}
+            </div>
+          ))}
+          <div style={{ ...S.card, borderLeft: `2px solid ${T.accent}` }}>
+            <div style={{ ...S.label, color: T.accent, marginBottom: 6 }}>VUISTREGELS</div>
+            {[
+              "ap ≥ ⅔ × rε (anders wrijf je)",
+              "fn < 80% van wiper-breedte bs",
+              "Doorbuiging ~ L³ (dubbele lengte = 8× meer buiging)",
+              "Stijfheid ~ D⁴ (dubbele diameter = 16× stijver)",
+              "Demping overwegen bij uitsteek > 4×D",
+              "Meetonzekerheid < ¼ × tolerantie",
+            ].map((r, i) => (
+              <div key={i} style={{ color: T.text, fontSize: 12, padding: "3px 0" }}>{r}</div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {naslagTab === "params" && (
+        <div>
+          {[
+            { sym: "vc", naam: "Snijsnelheid", eenheid: "m/min", omhoog: "meer hitte, productiviteit, andere slijtage", omlaag: "wrijven, BUE, werkverharding" },
+            { sym: "n", naam: "Toerental", eenheid: "omw/min", omhoog: "hogere vc bij zelfde Dm", omlaag: "lagere vc" },
+            { sym: "fn", naam: "Voeding/omw", eenheid: "mm/omw", omhoog: "dikkere spaan, meer kracht, betere spaanbreuk", omlaag: "wrijven, lange spanen" },
+            { sym: "fz", naam: "Voeding/tand", eenheid: "mm/tand", omhoog: "meer per tand, productief", omlaag: "dunne spaan, wrijven" },
+            { sym: "ap", naam: "Snedediepte", eenheid: "mm", omhoog: "meer MRR, meer kracht", omlaag: "wrijven als < ⅔ rε" },
+            { sym: "ae", naam: "Radiale insnijding", eenheid: "mm", omhoog: "meer contact, kracht, warmte", omlaag: "dunne spaan" },
+            { sym: "rε", naam: "Neusradius", eenheid: "mm", omhoog: "sterkere kant, betere finish (als stabiel)", omlaag: "minder radiale kracht" },
+            { sym: "kr", naam: "Instelhoek", eenheid: "°", omhoog: "90°: meer radiaal", omlaag: "45°/10°: meer axiaal" },
+            { sym: "l/D", naam: "Uitsteeklengte", eenheid: "—", omhoog: "exponentieel meer buiging (L³!)", omlaag: "stabieler" },
+            { sym: "kc", naam: "Spec. snijkracht", eenheid: "N/mm²", omhoog: "harder materiaal, meer vermogen nodig", omlaag: "zachter materiaal" },
+          ].map(p => (
+            <div key={p.sym} style={S.card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: T.accent }}>{p.sym}</span>
+                <span style={{ ...S.label }}>{p.eenheid}</span>
+              </div>
+              <div style={{ color: T.white, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{p.naam}</div>
+              <div style={{ fontSize: 11 }}>
+                <span style={{ color: T.green }}>↑ {p.omhoog}</span><br />
+                <span style={{ color: T.red }}>↓ {p.omlaag}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {naslagTab === "materialen" && (
+        <div>
+          {MATERIALEN.map(m => (
+            <div key={m.iso} style={{ ...S.card, borderLeft: `3px solid ${m.kleur}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: m.kleur }}>ISO {m.iso}</span>
+                <span style={{ color: T.textMuted, fontSize: 12 }}>{m.naam}</span>
+              </div>
+              <div style={{ fontSize: 12, color: T.text, marginBottom: 4 }}>{m.kenmerken}</div>
+              <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
+                <span style={{ color: T.textMuted }}>vc (carbide): <span style={{ color: T.accent, fontFamily: T.mono }}>{m.vc_carbide}</span> m/min</span>
+                <span style={{ color: T.textMuted }}>kc: <span style={{ color: T.accent, fontFamily: T.mono }}>{m.kc}</span> N/mm²</span>
+              </div>
+              <div style={{ fontSize: 11, color: T.red, marginTop: 4 }}>⚠ {m.risico}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {naslagTab === "toleranties" && (
+        <>
+          <div style={S.card}>
+            <div style={{ ...S.label, color: T.accent, marginBottom: 8 }}>IT-KLASSEN (bij Ø25)</div>
+            {[
+              { it: "IT6", band: "13 µm", toepassing: "Precisielagers, instrumentdelen" },
+              { it: "IT7", band: "21 µm", toepassing: "Standaard lagerpassing (H7)" },
+              { it: "IT8", band: "33 µm", toepassing: "Machinebouw algemeen" },
+              { it: "IT9", band: "52 µm", toepassing: "Ruw bewerkt, vrije maten" },
+              { it: "IT11", band: "130 µm", toepassing: "Onbewerkte maten" },
+            ].map(t => (
+              <div key={t.it} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: `1px solid ${T.bg1}`, fontSize: 12 }}>
+                <span style={{ fontFamily: T.mono, color: T.accent, fontWeight: 700 }}>{t.it}</span>
+                <span style={{ color: T.text }}>{t.band}</span>
+                <span style={{ color: T.textMuted, fontSize: 11 }}>{t.toepassing}</span>
+              </div>
+            ))}
+          </div>
+          <div style={S.card}>
+            <div style={{ ...S.label, color: T.accent, marginBottom: 8 }}>PASSINGEN</div>
+            {[
+              { code: "H7/g6", type: "Speling", gebruik: "Glijlager, nauwkeurig schuiven" },
+              { code: "H7/h6", type: "Overgang", gebruik: "Positioneren, demontabel" },
+              { code: "H7/k6", type: "Overgang", gebruik: "Tandwielen op assen" },
+              { code: "H7/p6", type: "Pers", gebruik: "Permanent, lagers persen" },
+              { code: "H7/s6", type: "Zware pers", gebruik: "Niet demontabel" },
+            ].map(p => (
+              <div key={p.code} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: `1px solid ${T.bg1}`, fontSize: 12 }}>
+                <span style={{ fontFamily: T.mono, color: T.accent, fontWeight: 700, width: 60 }}>{p.code}</span>
+                <span style={{ color: p.type === "Speling" ? T.green : p.type === "Pers" || p.type === "Zware pers" ? T.red : T.accent, width: 70 }}>{p.type}</span>
+                <span style={{ color: T.textMuted, fontSize: 11, flex: 1, textAlign: "right" }}>{p.gebruik}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ ...S.card, borderLeft: `2px solid ${T.blueLight}` }}>
+            <div style={{ ...S.label, color: T.blueLight, marginBottom: 6 }}>OPPERVLAKTERUWHEID</div>
+            {[
+              { param: "Ra", uitleg: "Gemiddelde ruwheid. Meest gebruikt, maar verbergt uitschieters." },
+              { param: "Rz", uitleg: "Gemiddelde max. profielhoogte. Beter voor afdichtvlakken." },
+              { param: "Rt", uitleg: "Totale profielhoogte. Vangt de ergste uitschieter." },
+            ].map(r => (
+              <div key={r.param} style={{ marginBottom: 6 }}>
+                <span style={{ fontFamily: T.mono, color: T.accent, fontWeight: 700 }}>{r.param}</span>
+                <span style={{ color: T.text, fontSize: 12, marginLeft: 8 }}>{r.uitleg}</span>
+              </div>
+            ))}
+            <div style={{ color: T.textMuted, fontSize: 11, marginTop: 8, fontStyle: "italic" }}>
+              Twee oppervlakken met dezelfde Ra kunnen totaal anders functioneren. Altijd de functie van het oppervlak als uitgangspunt nemen.
+            </div>
+          </div>
+        </>
+      )}
+
+      {naslagTab === "gcode" && (
+        <>
+          <div style={S.card}>
+            <div style={{ ...S.label, color: T.accent, marginBottom: 8 }}>FANUC — DRAAIEN (meest gebruikte codes)</div>
+            {[
+              { code: "G00", functie: "Snelgang (rapid)", opmerking: "Nooit in het materiaal! Alleen positioneren." },
+              { code: "G01", functie: "Lineaire interpolatie (voedingsgang)", opmerking: "Met F-waarde. Dit is je snijbeweging." },
+              { code: "G02", functie: "Cirkelboog met de klok mee", opmerking: "Met R of I/K voor radius/centrum." },
+              { code: "G03", functie: "Cirkelboog tegen de klok in", opmerking: "Zelfde syntax als G02, andere richting." },
+              { code: "G28", functie: "Referentiepunt benaderen", opmerking: "Veilig retourneren. Altijd via een tussenpunt." },
+              { code: "G40", functie: "Neusradiuscompensatie UIT", opmerking: "Standaard in setup-blok." },
+              { code: "G41/G42", functie: "Neusradiuscompensatie LINKS/RECHTS", opmerking: "Essentieel voor contouren en profielen." },
+              { code: "G50", functie: "Max. toerental instellen", opmerking: "Veiligheidsgrens bij CSS. Altijd instellen!" },
+              { code: "G70", functie: "Finish-cyclus", opmerking: "Nabewerken op eerder gedefinieerde contour." },
+              { code: "G71", functie: "Ruw-cyclus langsdraaien", opmerking: "Automatisch ruwen in meerdere passes." },
+              { code: "G76", functie: "Draadsnijcyclus", opmerking: "Meerdere passes met afnemende diepte." },
+              { code: "G96", functie: "Constante snijsnelheid (CSS)", opmerking: "S = m/min. Machine past rpm aan. STANDAARD." },
+              { code: "G97", functie: "Vast toerental", opmerking: "S = omw/min. Alleen voor specifieke situaties." },
+              { code: "G99", functie: "Voeding per omwenteling", opmerking: "F = mm/omw. Standaard bij draaien." },
+              { code: "G98", functie: "Voeding per minuut", opmerking: "F = mm/min. Voor speciale bewerkingen." },
+            ].map(g => (
+              <div key={g.code} style={{ display: "flex", gap: 8, padding: "4px 0", borderBottom: `1px solid ${T.bg1}`, fontSize: 12, alignItems: "flex-start" }}>
+                <span style={{ fontFamily: T.mono, color: T.accent, fontWeight: 700, minWidth: 44 }}>{g.code}</span>
+                <span style={{ color: T.text, minWidth: 160 }}>{g.functie}</span>
+                <span style={{ color: T.textDim, fontSize: 10, flex: 1 }}>{g.opmerking}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={S.card}>
+            <div style={{ ...S.label, color: T.blue, marginBottom: 8 }}>FANUC — FREZEN (meest gebruikte codes)</div>
+            {[
+              { code: "G00", functie: "Snelgang", opmerking: "Positioneren. Nooit in materiaal." },
+              { code: "G01", functie: "Lineair voeden", opmerking: "F in mm/min (G94) of mm/omw (G95)." },
+              { code: "G02/03", functie: "Cirkelboog CW/CCW", opmerking: "Voor radii en cirkelbogen." },
+              { code: "G17", functie: "XY-vlak selecteren", opmerking: "Standaard bij verticaal frezen." },
+              { code: "G40", functie: "Freesradiuscompensatie UIT", opmerking: "In setup-blok." },
+              { code: "G41/G42", functie: "Freescompensatie LINKS/RECHTS", opmerking: "Essentieel voor contourfrezen." },
+              { code: "G43", functie: "Gereedschapslengte-compensatie", opmerking: "Met H-nummer. Altijd activeren." },
+              { code: "G54-G59", functie: "Werkstuk-nulpunten", opmerking: "G54 = meest gebruikt. Nulpunt = referentie." },
+              { code: "G73", functie: "Hoge-snelheid peck-cyclus", opmerking: "Korte retract. Voor niet te diepe gaten." },
+              { code: "G81", functie: "Standaard boorcyclus", opmerking: "Eenvoudig doorlopend boren." },
+              { code: "G83", functie: "Diepe-gat boorcyclus", opmerking: "Volledige retract voor chip evacuatie." },
+              { code: "G94", functie: "Voeding per minuut", opmerking: "F = mm/min. STANDAARD bij frezen." },
+              { code: "G95", functie: "Voeding per omwenteling", opmerking: "F = mm/omw. Voor boren op freesbank." },
+            ].map(g => (
+              <div key={g.code} style={{ display: "flex", gap: 8, padding: "4px 0", borderBottom: `1px solid ${T.bg1}`, fontSize: 12, alignItems: "flex-start" }}>
+                <span style={{ fontFamily: T.mono, color: T.blue, fontWeight: 700, minWidth: 44 }}>{g.code}</span>
+                <span style={{ color: T.text, minWidth: 160 }}>{g.functie}</span>
+                <span style={{ color: T.textDim, fontSize: 10, flex: 1 }}>{g.opmerking}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={S.card}>
+            <div style={{ ...S.label, color: T.green, marginBottom: 8 }}>M-CODES (universeel)</div>
+            {[
+              { code: "M00", functie: "Programma-stop", opmerking: "Wacht op operator. Handig voor meten." },
+              { code: "M01", functie: "Optionele stop", opmerking: "Alleen als optioneel-stop schakelaar AAN staat." },
+              { code: "M03", functie: "Spil AAN rechtsom (CW)", opmerking: "Standaard draairichting." },
+              { code: "M04", functie: "Spil AAN linksom (CCW)", opmerking: "Voor linkse draad of specifieke frezen." },
+              { code: "M05", functie: "Spil STOP", opmerking: "Altijd voor gereedschapswissel." },
+              { code: "M06", functie: "Gereedschapswissel", opmerking: "Op freesbank. Op draaibank: T-commando." },
+              { code: "M08", functie: "Koeling AAN", opmerking: "" },
+              { code: "M09", functie: "Koeling UIT", opmerking: "" },
+              { code: "M30", functie: "Programma einde + reset", opmerking: "Standaard einde." },
+            ].map(g => (
+              <div key={g.code} style={{ display: "flex", gap: 8, padding: "4px 0", borderBottom: `1px solid ${T.bg1}`, fontSize: 12, alignItems: "flex-start" }}>
+                <span style={{ fontFamily: T.mono, color: T.green, fontWeight: 700, minWidth: 44 }}>{g.code}</span>
+                <span style={{ color: T.text, minWidth: 160 }}>{g.functie}</span>
+                <span style={{ color: T.textDim, fontSize: 10, flex: 1 }}>{g.opmerking}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ ...S.card, borderLeft: `2px solid ${T.accent}` }}>
+            <div style={{ ...S.label, color: T.accent, marginBottom: 6 }}>MAZATROL TIPS</div>
+            <div style={{ fontSize: 12, color: T.text, lineHeight: 1.6 }}>
+              <p style={{ margin: "0 0 8px" }}>Mazatrol is conversational: je vult bewerkingen in via menu's in plaats van G-code te schrijven. De besturing genereert het pad.</p>
+              <p style={{ margin: "0 0 8px" }}>Wanneer Mazatrol gebruiken: standaardvormen (cilinder, vlak, groef, draad), snelle programmering, eenvoudige werkstukken.</p>
+              <p style={{ margin: "0 0 8px" }}>Wanneer EIA/ISO (G-code): complexe contouren, speciale strategieën (trochoidaal, helical entry), wanneer je volledige controle over het pad wilt.</p>
+              <p style={{ margin: 0, color: T.accentLight, fontWeight: 600 }}>Tip: op de Mazak kun je wisselen tussen Mazatrol en EIA/ISO. Leer beide — Mazatrol voor snelheid, G-code voor begrip en controle.</p>
+            </div>
+          </div>
+
+          <div style={{ ...S.card, background: T.bg1 }}>
+            <div style={{ ...S.label, color: T.red, marginBottom: 6 }}>VEILIGHEIDSREGELS CNC</div>
+            {[
+              "Altijd eerst dry-run of single block bij nieuw programma",
+              "G50 Smax instellen bij CSS (Fanuc draaien)",
+              "Controleer gereedschapsoffsets VOOR de eerste snede",
+              "Nooit G00 in de richting van het werkstuk zonder zeker te zijn van de positie",
+              "Bij twijfel: M00 programmeren en handmatig controleren",
+              "Deuren dicht. Bril op. Spanen zijn geen confetti.",
+            ].map((r, i) => (
+              <div key={i} style={{ color: T.text, fontSize: 12, padding: "3px 0" }}>⚠ {r}</div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  const renderLogboek = () => {
+    const entries = OPDRACHTEN.filter(o => logboek[o.id]).map(o => ({
+      ...o,
+      log: logboek[o.id],
+      filled: o.stappen.filter((_, i) => logboek[o.id][i] && logboek[o.id][i].trim()).length,
+    })).sort((a, b) => (b.log.lastUpdate || 0) - (a.log.lastUpdate || 0));
+
+    return (
+      <div style={{ padding: "12px 0" }}>
+        {entries.length === 0 ? (
+          <div style={{ ...S.card, textAlign: "center" }}>
+            <p style={{ color: T.textMuted, fontSize: 13 }}>Nog geen notities. Start een opdracht en vul je observaties in.</p>
+          </div>
+        ) : entries.map(o => (
+          <button key={o.id} onClick={() => { setSelOpdracht(o); setTab("opdrachten"); }}
+            style={{ ...S.card, cursor: "pointer", width: "100%", textAlign: "left", display: "block" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <span style={{ color: T.white, fontSize: 14, fontWeight: 600 }}>{o.titel}</span>
+              <span style={{ ...S.label }}>{o.filled}/{o.stappen.length} stappen</span>
+            </div>
+            <div style={{ background: T.bg1, borderRadius: 2, height: 2, overflow: "hidden" }}>
+              <div style={{ background: o.filled === o.stappen.length ? T.green : T.accent, height: "100%", width: `${(o.filled / o.stappen.length) * 100}%` }} />
+            </div>
+            {o.log.lastUpdate && (
+              <div style={{ ...S.label, marginTop: 4 }}>
+                Laatst bewerkt: {new Date(o.log.lastUpdate).toLocaleDateString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  // ====== RENDER ======
+  const tabs = [
+    { key: "opdrachten", label: "Opdrachten", icon: "▶" },
+    { key: "rekenmachine", label: "Rekenmachine", icon: "⊕" },
+    { key: "diagnose", label: "Diagnose", icon: "◉" },
+    { key: "naslag", label: "Naslagwerk", icon: "≡" },
+    { key: "logboek", label: "Logboek", icon: "☰" },
+  ];
+
+  return (
+    <div style={S.app}>
+      {/* Header */}
+      <div style={S.header}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: T.white, letterSpacing: -0.3 }}>
+              <span style={{ color: T.accent }}>Verspaan</span>Meester
+            </div>
+          </div>
+          <div style={{ ...S.label }}>{completedCount}/{OPDRACHTEN.length} opdrachten</div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={S.tabs}>
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => { setTab(t.key); if (t.key !== "opdrachten") setSelOpdracht(null); }}
+            style={S.tab(tab === t.key)}>
+            <span style={{ marginRight: 4, fontFamily: T.mono }}>{t.icon}</span>{t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={S.content}>
+        {tab === "opdrachten" && renderOpdrachten()}
+        {tab === "rekenmachine" && renderCalc()}
+        {tab === "diagnose" && renderDiagnose()}
+        {tab === "naslag" && renderNaslag()}
+        {tab === "logboek" && renderLogboek()}
+      </div>
+    </div>
+  );
+}
+
+// Mount the app
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
