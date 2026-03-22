@@ -22,6 +22,20 @@ textarea{font-family:'IBM Plex Sans','Segoe UI',system-ui,sans-serif}
 ::-webkit-scrollbar-track{background:#12151a}
 ::-webkit-scrollbar-thumb{background:#2a303c;border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:#353d4d}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes barFill{from{width:0}to{width:var(--w)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.anim-fade-up{animation:fadeUp .22s cubic-bezier(.4,0,.2,1) both}
+.anim-fade-in{animation:fadeIn .18s ease both}
+.anim-stagger>*{animation:fadeUp .2s cubic-bezier(.4,0,.2,1) both}
+.anim-stagger>*:nth-child(1){animation-delay:.03s}
+.anim-stagger>*:nth-child(2){animation-delay:.07s}
+.anim-stagger>*:nth-child(3){animation-delay:.11s}
+.anim-stagger>*:nth-child(4){animation-delay:.15s}
+.anim-stagger>*:nth-child(5){animation-delay:.19s}
+.anim-stagger>*:nth-child(6){animation-delay:.23s}
+.anim-stagger>*:nth-child(n+7){animation-delay:.27s}
 </style>
 </head>
 <body>
@@ -97,6 +111,130 @@ const DIAGNOSE = {
     { symptoom: "Werkstuk tilt / verschuift", urgentie: 3, oorzaken: ["Tegenlopend frezen → krachten omhoog", "Opspankracht onvoldoende", "Te zware snede"], acties: ["Schakel over naar meelopend frezen", "Opspanning controleren en eventueel aandraaien", "ap of ae verlagen"], check: "Controleer opspanning vóór en na de snede" },
     { symptoom: "Overmatige hitte in sleuf", urgentie: 2, oorzaken: ["ae = volle diameter → maximaal contact", "Onvoldoende koeling/spaanafvoer", "vc te hoog"], acties: ["Trochoidaal frezen (kleine ae, hogere vf)", "Lineair hellend insteken i.p.v. plunge", "Koelmiddel/lucht toevoeren"], check: "Controleer spaankleur: blauw/paars = te heet" },
   ]
+};
+
+// ====== VARIABELEN ENCYCLOPEDIE ======
+const VARIABELEN = [
+  { cat: "SNELHEID", kleur: "#5a7fa8", sym: "▶▶", items: [
+    { sym: "vc", naam: "Snijsnelheid", eenheid: "m/min", formule: "vc = (π × D × n) / 1000", uitleg: "De snelheid waarmee het materiaal langs de snijkant beweegt. Niet hetzelfde als toerental!", groter: "meer hitte, hogere productiviteit, minder BUE", kleiner: "wrijven, BUE, werkverharding (ISO M)", tip: "Grootste invloed op standtijd. Altijd in materiaaladvies opzoeken." },
+    { sym: "n", naam: "Toerental", eenheid: "omw/min", formule: "n = (1000 × vc) / (π × D)", uitleg: "Hoe snel de spil ronddraait. Volgt uit vc en diameter — niet andersom instellen.", groter: "hogere vc bij gelijke D", kleiner: "lagere vc", tip: "CNC: gebruik G96 CSS. Machine past n automatisch aan als D verandert." },
+    { sym: "vf", naam: "Tafelvoeding", eenheid: "mm/min", formule: "vf = fn × n  |  vf = fz × n × zc", uitleg: "Hoe snel het gereedschap zich verplaatst langs het werkstuk.", groter: "hogere productiviteit, dikkere spaan", kleiner: "langzamer, dunnere spaan, kans op wrijven", tip: "Bij CSS stijgt n naarmate D kleiner wordt — vf stijgt dan automatisch mee." },
+  ]},
+  { cat: "VOEDING", kleur: "#5a9e6f", sym: "→", items: [
+    { sym: "fn", naam: "Voeding per omwenteling", eenheid: "mm/omw", formule: "vf = fn × n", uitleg: "Hoeveel het gereedschap opschuift per volle rondwenteling. Draaien.", groter: "dikkere spaan, betere spaanbreuk, ruwer oppervlak", kleiner: "wrijven, lange spanen, fijner oppervlak", tip: "Minimum: ap ≥ ⅔ × rε. Te laag fn = wrijven i.p.v. snijden." },
+    { sym: "fz", naam: "Voeding per tand", eenheid: "mm/tand", formule: "vf = fz × n × zc", uitleg: "Hoeveel iedere freestand per omwenteling oppakt. Frezen.", groter: "dikkere spaan, productief", kleiner: "dunne spaan, kans op wrijven en opbouw", tip: "Start op fabrikantadvies. Verhoog als alles stabiel is." },
+  ]},
+  { cat: "SNEDE", kleur: "#c8965a", sym: "⊕", items: [
+    { sym: "ap", naam: "Axiale snedediepte", eenheid: "mm", formule: "Q = ap × fn × vc  (draaien)", uitleg: "Hoe diep het gereedschap het materiaal in gaat, langs de as.", groter: "meer materiaalafname, meer snijkracht", kleiner: "wrijven als < ⅔ × rε", tip: "Vuistregel: ap ≥ ⅔ × rε. Te ondiep is erger dan te diep." },
+    { sym: "ae", naam: "Radiale insnijding", eenheid: "mm", formule: "Q = (ap × ae × vf) / 1000  (frezen)", uitleg: "Hoe breed de frees het materiaal insnijdt. Max = volledige freesdiameter.", groter: "meer contact, meer warmte en kracht", kleiner: "minder kracht, koeler, hogere vc mogelijk", tip: "Volle sleuf (ae = Dc): halveer vc en fz. Trochoidaal: kleine ae, hoge vf." },
+  ]},
+  { cat: "RESULTAAT", kleur: "#9a7ab8", sym: "=", items: [
+    { sym: "Q", naam: "Materiaalafname", eenheid: "cm³/min", formule: "Q = ap × fn × vc  |  Q = ap × ae × vf / 1000", uitleg: "Hoeveel materiaal per minuut wordt verwijderd. De maat voor productiviteit.", groter: "productiever, maar meer warmte/kracht", kleiner: "rustiger proces, lagere belasting", tip: "Hogere Q = hogere eisen aan machine, gereedschap en koeling." },
+    { sym: "Pc", naam: "Snijvermogen", eenheid: "kW", formule: "Pc = (vc × ap × fn × kc) / 60 000", uitleg: "Hoeveel vermogen de machine nodig heeft. Afhankelijk van het materiaal (kc).", groter: "meer materiaal, hogere vc of kc", kleiner: "lichter snijden, zachter materiaal", tip: "Controleer of je machine genoeg spilvermogen heeft. Staal P: meer dan alu N." },
+    { sym: "Rmax", naam: "Theoretische ruwheid", eenheid: "µm", formule: "Rmax ≈ 125 × fn² / rε", uitleg: "De theoretisch haalbare oppervlaktekwaliteit. In praktijk altijd slechter.", groter: "grotere fn of kleinere rε = ruwer", kleiner: "kleinere fn of grotere rε = gladder", tip: "Dubbele fn → 4× slechter (fn² relatie). Rε vergroten is makkelijker dan fn halveren." },
+  ]},
+  { cat: "GEREEDSCHAP", kleur: "#b85c5c", sym: "◈", items: [
+    { sym: "rε", naam: "Neusradius", eenheid: "mm", formule: "Rmax ≈ 125 × fn² / rε", uitleg: "De afrondingsradius van de snijkant van een insert. Bepaalt sterkte én oppervlak.", groter: "sterkere kant, betere finish, meer radiale kracht", kleiner: "minder radiale kracht, beter voor dunwandig", tip: "Standaard: 0.4 of 0.8 mm. Grotere rε bij lange uitsteek → kans op trillingen." },
+    { sym: "kr", naam: "Instelhoek", eenheid: "°", formule: "—", uitleg: "De hoek tussen de snijkant en de voedingsrichting. Bepaalt de krachtenrichting.", groter: "kr 90°: kracht overwegend radiaal (dwars op spil)", kleiner: "kr 45°: gebalanceerd axiaal/radiaal", tip: "Dunwandig: 90° (geen axiale kracht). Lange uitsteek: lagere kr." },
+    { sym: "l/D", naam: "Uitsteekverhouding", eenheid: "—", formule: "Doorbuiging ~ L³ / (E × I)", uitleg: "Verhouding uitsteeklengte tot gereedschapsdiameter. Stijfheidsmaat.", groter: "exponentieel meer doorbuiging (L³!)", kleiner: "stijver, stabieler, betere maat", tip: "L/D > 4: overweeg demping. L verdubbelen = 8× meer doorbuiging." },
+  ]},
+  { cat: "MATERIAAL", kleur: "#daa872", sym: "◎", items: [
+    { sym: "kc", naam: "Spec. snijkracht", eenheid: "N/mm²", formule: "Pc = (vc × ap × fn × kc) / 60 000", uitleg: "Hoeveel kracht per mm² snijvlak nodig is. Eigenschap van het werkstukmateriaal.", groter: "harder/taaier materiaal, meer vermogen nodig", kleiner: "zachter materiaal (alu, koper)", tip: "P-staal: 1500–2500 · RVS M: 2000–3000 · Alu N: 400–900 · Ti S: 2500–4000" },
+  ]},
+];
+
+// ====== SNIJDATA OPZOEKTABEL ======
+const SNIJDATA = [
+  { iso: "P", naam: "Staal (C45, St52)", kleur: "#5a7fa8",
+    draaien_ruwen:  { vc:"180–280", fn:"0.20–0.40", ap:"2.0–5.0", koel:"aanbevolen", tip:"Lange spanen → fn verhogen. BUE < 100 m/min → vc omhoog." },
+    draaien_finish: { vc:"250–400", fn:"0.05–0.15", ap:"0.3–1.0", koel:"aanbevolen", tip:"Wiper-insert voor Ra < 1.6. Rmax ≈ 125 × fn² / rε." },
+    frezen_ruwen:   { vc:"150–230", fz:"0.12–0.22", ap:"3–8",   ae:"Dc/2",  koel:"ja", tip:"Meelopend frezen. Chipbreaker geometrie kiezen." },
+    frezen_finish:  { vc:"200–320", fz:"0.05–0.10", ap:"0.3–1", ae:"Dc/4",  koel:"ja", tip:"fn < 80% wiper-breedte bij vlakfrezen." },
+  },
+  { iso: "M", naam: "Roestvast (316L, 304)", kleur: "#c8965a",
+    draaien_ruwen:  { vc:"120–200", fn:"0.15–0.30", ap:"1.5–4.0", koel:"verplicht", tip:"Nooit wrijven. ap ≥ ⅔ rε. Hoge vc voorkomt BUE en werkverharding." },
+    draaien_finish: { vc:"150–250", fn:"0.05–0.12", ap:"0.2–0.8", koel:"verplicht", tip:"Scherpe insert, gladde coating. Positieve geometrie." },
+    frezen_ruwen:   { vc:"80–160",  fz:"0.08–0.18", ap:"2–5",   ae:"Dc/3",  koel:"verplicht", tip:"Hoge druk koeling. Korte sneden, laat materiaal afkoelen." },
+    frezen_finish:  { vc:"120–200", fz:"0.04–0.10", ap:"0.2–0.8", ae:"Dc/5", koel:"verplicht", tip:"Kerfslijtage bewaken. Scherp gereedschap is alles." },
+  },
+  { iso: "K", naam: "Gietijzer (GG25, GGG50)", kleur: "#b85c5c",
+    draaien_ruwen:  { vc:"150–300", fn:"0.20–0.40", ap:"2.0–5.0", koel:"droog/lucht", tip:"Kortspanig materiaal. Stof afzuigen. Geen vloeistof bij GG." },
+    draaien_finish: { vc:"200–400", fn:"0.05–0.15", ap:"0.3–1.0", koel:"droog", tip:"CBN-insert voor harde soorten. Droog voor goede finish." },
+    frezen_ruwen:   { vc:"120–250", fz:"0.10–0.20", ap:"2–6",   ae:"Dc/2",  koel:"droog", tip:"Abrasief. Flank- en kerfslijtage goed bewaken." },
+    frezen_finish:  { vc:"180–350", fz:"0.05–0.12", ap:"0.2–1", ae:"Dc/3",  koel:"droog", tip:"Stof = gevaar. Mondkapje/afzuiging verplicht." },
+  },
+  { iso: "N", naam: "Aluminium / Non-ferro", kleur: "#5a9e6f",
+    draaien_ruwen:  { vc:"300–1000", fn:"0.15–0.40", ap:"2.0–8.0", koel:"olie/emulsie", tip:"Hoge vc mogelijk. Scherpe geometrie voorkomt opbouw (BUE)." },
+    draaien_finish: { vc:"500–3000", fn:"0.05–0.15", ap:"0.2–1.0", koel:"olie", tip:"PCD of polished carbide. Spiegel-finish mogelijk." },
+    frezen_ruwen:   { vc:"300–800",  fz:"0.10–0.25", ap:"3–10",  ae:"Dc/2",  koel:"emulsie/lucht", tip:"Grote spaanruimte, weinig tanden. Spanen moeten weg!" },
+    frezen_finish:  { vc:"500–2000", fz:"0.05–0.15", ap:"0.2–1", ae:"Dc/4",  koel:"olie", tip:"3-tandige frees met grote spaanruimte. DLC coating." },
+  },
+  { iso: "S", naam: "Titanium / HRSA", kleur: "#daa872",
+    draaien_ruwen:  { vc:"20–60",  fn:"0.10–0.25", ap:"1.0–3.0", koel:"hoge druk", tip:"LANGZAAM. Hitte is de vijand. Hoge druk koeling is essentieel." },
+    draaien_finish: { vc:"40–80",  fn:"0.05–0.12", ap:"0.2–0.8", koel:"hoge druk", tip:"Verse insert per onderdeel. Temperatuur bewaken." },
+    frezen_ruwen:   { vc:"20–50",  fz:"0.04–0.10", ap:"0.5–2",  ae:"Dc/10", koel:"hoge druk", tip:"Trochoidaal frezen: kleine ae, hogere vf. Koelt beter." },
+    frezen_finish:  { vc:"30–60",  fz:"0.03–0.08", ap:"0.2–0.5", ae:"Dc/8",  koel:"hoge druk", tip:"Spaankleur bewaken: blauw = te heet → stop." },
+  },
+  { iso: "H", naam: "Gehard staal (> 45 HRC)", kleur: "#9a7ab8",
+    draaien_ruwen:  { vc:"80–150",  fn:"0.10–0.20", ap:"0.3–1.5", koel:"droog/lucht", tip:"CBN of keramiek vereist. Kan slijpen vervangen." },
+    draaien_finish: { vc:"100–200", fn:"0.05–0.10", ap:"0.1–0.5", koel:"droog", tip:"PCBN voor hoogste kwaliteit. Ra 0.4 haalbaar." },
+    frezen_ruwen:   { vc:"60–120",  fz:"0.05–0.10", ap:"0.2–1",  ae:"Dc/8",  koel:"droog", tip:"Hardfrezen met kleine sneden. Stijfheid is alles." },
+    frezen_finish:  { vc:"80–160",  fz:"0.03–0.08", ap:"0.05–0.3", ae:"Dc/10", koel:"droog", tip:"Hoge spilnauwkeurigheid vereist. Minder dan 0.005 mm uitloop." },
+  },
+];
+
+// ====== OPSPANWIJZER ======
+const OPSPANWIJZER = {
+  draaien: [
+    { titel: "Klauwplaat (3-klauw)", icon: "◎", kleur: "#5a7fa8", wanneer: "Standaard voor kort werk (L/D < 3)", stappen: [
+      "Kies de juiste backen: buiten- of binnenklauw?",
+      "Werkstuk inleggen tot aan schouder of minimaal 15 mm grip",
+      "Aandraaien: vast met sleutel — NIET met buis of verlenging",
+      "Check: draait het werkstuk concentrisch? (klokje op Ø: < 0.05 mm)",
+      "Bij lange staven: ondersteun met losse center of steady rest",
+      "Verwijder de klauwplaatsleutel vóór je de machine start",
+    ], gevaren: ["Sleutel in klauwplaat laten → vliegend projectiel", "Te weinig grip → werkstuk vluchten", "Te hard aandraaien → vervormde Ø"] },
+    { titel: "Tussen centers", icon: "←→", kleur: "#5a9e6f", wanneer: "Lange aswerk (L/D > 3), hoge maatnauwkeurigheid", stappen: [
+      "Centers aandraaien in spil (vaste center) en losse kop (meelopende center)",
+      "Centerboringen maken in beide eindvlakken (60°, juiste diameter)",
+      "Meenemer (driehoekvorm) monteren op spil-einde werkstuk",
+      "Losse kop inschuiven tot center volledig in centerboring zit",
+      "Axiale kracht instellen: draaien moet soepel maar zonder speling",
+      "Controleer bij warmte: werkstuk kan uitzetten → losse kop aanpassen",
+    ], gevaren: ["Te strak: overmatige wrijving, hitte, maatfout", "Te los: vibraties, slechte concentriciteit", "Droger center → vreet vast"] },
+    { titel: "Spanbus / collet", icon: "⊙", kleur: "#c8965a", wanneer: "Precisie, dunne staven, seriewerk", stappen: [
+      "Juiste spanbusmaat kiezen (exact gelijk aan stafdiameter)",
+      "Staf volledig inbrengen tot aanslag",
+      "Spanmoer aandraaien met de juiste sleutel (niet te hard)",
+      "Controleer uitloopnauwkeurigheid (< 0.01 mm bij precisiewerk)",
+      "Staflengte altijd gelijk houden voor herhaalnauwkeurigheid",
+    ], gevaren: ["Verkeerde maat spanbus → deformatie of slip", "Te veel uitsteek → trillingen"] },
+  ],
+  frezen: [
+    { titel: "Bankschroef (machineklem)", icon: "⊟", kleur: "#5a7fa8", wanneer: "Prismatisch werk, de meest gebruikte opspanning", stappen: [
+      "Bankschroef uitlijnen op de tafel (klokje op vaste bek: < 0.02 mm)",
+      "Parallelleggers (onderleggers) kiezen: werkstuk moet volledig flat liggen",
+      "Werkstuk inleggen, handmatig aandrukken, dan tikken op werkstuk → mag niet wiebelen",
+      "Bankschroef aandraaien — werkstuk mag NIET omhoog komen",
+      "Controleer: klop met kunststof hamer op werkstuk → doffe klank = goed opgespannen",
+      "Gereedschapslengtecompensatie G43 activeren na gereedschapwissel",
+    ], gevaren: ["Geen parallellegger → werkstuk kantelt bij eerste snede", "Tegenlopend frezen → werkstuk licht op", "Vergeten uitlijnen → hoekfout in product"] },
+    { titel: "Klemmen op tafel", icon: "⊓", kleur: "#5a9e6f", wanneer: "Grote of onregelmatige werkstukken", stappen: [
+      "T-sleuven kiezen die krachten opvangen (niet naast maar tégenover het werkstuk)",
+      "Steunblokken même hoogte als werkstuk (of iets lager)",
+      "Klemmen: schroef zo dicht mogelijk bij het werkstuk, niet bij het steunblok",
+      "Aandraaimomenten gelijkmatig verdelen (kruiselings)",
+      "Werkstuk proberen te bewegen voor de eerste snede — mag niet bewegen",
+      "Extra klemmen bij zware bewerkingen (tussentijds nakijken)",
+    ], gevaren: ["Schroef te ver van werkstuk → hefboomwerking, klem pakt niet", "Steunblok te hoog → werkstuk wordt opgetild"] },
+    { titel: "Vacuümtafel / lijm", icon: "◈", kleur: "#daa872", wanneer: "Dunne platen, zachte materialen, optisch werk", stappen: [
+      "Oppervlak schoonmaken (vet, stof, koelmiddel verwijderen)",
+      "Vacuüm aanzetten en controleren (vacuümmeter)",
+      "Test opspankracht: kun je het werkstuk met hand schuiven? Zo ja: stop",
+      "Lichte sneden: grote ae/ap verhoogt trekkracht op werkstuk",
+      "Koelmiddel droog of minimum quantity lubricant (vacuüm en vloeistof gaan slecht samen)",
+    ], gevaren: ["Vacuüm wegvallen tijdens bewerking (stroom/lekkage)", "Vloeistof doorbreken vacuümfilm → werkstuk vliegt weg"] },
+  ],
 };
 
 // Werkplaatsopdrachten — de kern van de app
@@ -430,15 +568,20 @@ Tolerantie: h6 op Ø25 = 25.000 tot 24.987 mm.`,
 
 // ====== MAIN APP ======
 function App() {
-  const [tab, setTab] = useState("opdrachten");
+  const [tab, setTab] = useState("thuis");
   const [selOpdracht, setSelOpdracht] = useState(null);
   const [logboek, setLogboek] = useState({});
   const [diagProces, setDiagProces] = useState("draaien");
   const [diagOpen, setDiagOpen] = useState(null);
   const [calcProc, setCalcProc] = useState("draaien");
   const [calcVals, setCalcVals] = useState({});
-  const [naslagTab, setNaslagTab] = useState("formules");
+  const [naslagTab, setNaslagTab] = useState("variabelen");
   const [filterProces, setFilterProces] = useState("all");
+  const [varOpen, setVarOpen] = useState(null);
+  const [snijMateriaal, setSnijMateriaal] = useState("P");
+  const [snijBewerking, setSnijBewerking] = useState("draaien_ruwen");
+  const [opspanProces, setOpspanProces] = useState("draaien");
+  const [opspanOpen, setOpspanOpen] = useState(null);
 
   // Load logboek
   useEffect(() => {
@@ -464,12 +607,164 @@ function App() {
     header: { background: T.bg1, borderBottom: `1px solid ${T.border}`, padding: "12px 16px", position: "sticky", top: 0, zIndex: 100 },
     content: { maxWidth: 640, margin: "0 auto", padding: "0 12px 80px" },
     tabs: { display: "flex", background: T.bg1, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 52, zIndex: 99, overflowX: "auto" },
-    tab: (active) => ({ padding: "10px 16px", border: "none", borderBottom: active ? `2px solid ${T.accent}` : "2px solid transparent", background: "none", color: active ? T.accent : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontFamily: T.body }),
+    tab: (active) => ({ padding: "10px 16px", border: "none", borderBottom: active ? `2px solid ${T.accent}` : "2px solid transparent", background: active ? T.accent + "0c" : "none", color: active ? T.accent : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontFamily: T.body, transition: "color 0.15s, background 0.15s" }),
     card: { background: T.bg2, border: `1px solid ${T.border}`, borderRadius: T.r, padding: "14px 16px", marginBottom: 8 },
     btn: (primary) => ({ background: primary ? T.accent : T.bg3, color: primary ? T.bg0 : T.text, border: `1px solid ${primary ? T.accent : T.border}`, borderRadius: T.r, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: T.body }),
     input: { background: T.bg1, border: `1px solid ${T.border}`, borderRadius: T.r, color: T.white, padding: "8px 12px", fontSize: 13, fontFamily: T.mono, outline: "none", width: "100%" },
     label: { color: T.textMuted, fontSize: 11, fontFamily: T.mono, letterSpacing: 0.5 },
     mono: { fontFamily: T.mono, color: T.accent },
+  };
+
+  // ====== TAB: THUIS (DASHBOARD) ======
+  const renderThuis = () => {
+    const procesGroepen = [
+      { key: "draaien", label: "Draaien", kleur: T.blue, icon: "◎" },
+      { key: "frezen",  label: "Frezen",  kleur: T.accent, icon: "⊕" },
+      { key: "meten",   label: "Meten",   kleur: T.green, icon: "△" },
+      { key: "cnc",     label: "CNC",     kleur: T.blueLight, icon: "▶" },
+      { key: "opspanning", label: "Opspanning", kleur: "#9a7ab8", icon: "⊟" },
+      { key: "project", label: "Project", kleur: T.accentLight, icon: "★" },
+    ];
+    const kernVars = [
+      { sym: "vc", naam: "Snijsnelheid", kleur: "#5a7fa8", eenheid: "m/min", kort: "snelheid langs snijkant" },
+      { sym: "n",  naam: "Toerental",    kleur: "#5a7fa8", eenheid: "omw/min", kort: "spilrotatie" },
+      { sym: "fn", naam: "Voeding/omw",  kleur: "#5a9e6f", eenheid: "mm/omw", kort: "opschuiving per slag" },
+      { sym: "ap", naam: "Snedediepte",  kleur: "#c8965a", eenheid: "mm", kort: "diepte in het materiaal" },
+      { sym: "Q",  naam: "Materiaalafname", kleur: "#9a7ab8", eenheid: "cm³/min", kort: "productiviteit" },
+      { sym: "Rmax", naam: "Ruwheid",    kleur: "#9a7ab8", eenheid: "µm", kort: "125 × fn² / rε" },
+    ];
+    const openOpdrachten = OPDRACHTEN.filter(o => {
+      const log = logboek[o.id] || {};
+      const filled = o.stappen.filter((_, i) => log[i] && log[i].trim()).length;
+      return filled > 0 && filled < o.stappen.length;
+    }).slice(0, 3);
+
+    return (
+      <div className="anim-fade-up" style={{ padding: "16px 0" }}>
+        {/* Welkomst */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: T.white, letterSpacing: -0.5, lineHeight: 1.2 }}>
+            Jouw leerlijn
+          </div>
+          <div style={{ color: T.textMuted, fontSize: 13, marginTop: 3 }}>
+            {completedCount} van {OPDRACHTEN.length} opdrachten afgerond
+          </div>
+        </div>
+
+        {/* Progress per onderwerp */}
+        <div style={{ ...S.card, padding: "16px 16px 12px", marginBottom: 12 }}>
+          <div style={{ ...S.label, marginBottom: 12 }}>VOORTGANG PER ONDERWERP</div>
+          <div className="anim-stagger">
+            {procesGroepen.map(g => {
+              const totaal = OPDRACHTEN.filter(o => o.proces === g.key).length;
+              const gedaan = OPDRACHTEN.filter(o => {
+                if (o.proces !== g.key) return false;
+                const log = logboek[o.id];
+                return log && o.stappen.every((_, i) => log[i] && log[i].trim());
+              }).length;
+              const pct = totaal ? Math.round((gedaan / totaal) * 100) : 0;
+              return (
+                <div key={g.key} style={{ marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: pct === 100 ? g.kleur : T.text }}>
+                      <span style={{ fontFamily: T.mono, marginRight: 6, color: g.kleur }}>{g.icon}</span>
+                      {g.label}
+                    </span>
+                    <span style={{ fontFamily: T.mono, fontSize: 11, color: pct === 100 ? g.kleur : T.textMuted }}>
+                      {gedaan}/{totaal}
+                    </span>
+                  </div>
+                  <div style={{ background: T.bg1, borderRadius: 4, height: 5, overflow: "hidden" }}>
+                    <div style={{ background: pct === 100 ? g.kleur : g.kleur + "99", height: "100%", width: `${pct}%`, borderRadius: 4, transition: "width 0.6s cubic-bezier(.4,0,.2,1)" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Kernvariabelen grid */}
+        <div style={{ ...S.card, marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ ...S.label }}>KERNVARIABELEN — WAT JE MOET KENNEN</div>
+            <button onClick={() => { setTab("naslag"); setNaslagTab("variabelen"); }}
+              style={{ background: "none", border: "none", color: T.accent, fontSize: 11, cursor: "pointer", fontFamily: T.mono }}>alle →</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+            {kernVars.map(v => (
+              <div key={v.sym} onClick={() => { setTab("naslag"); setNaslagTab("variabelen"); }}
+                style={{ background: T.bg1, borderRadius: T.r, padding: "10px 10px 8px", borderLeft: `2px solid ${v.kleur}`, cursor: "pointer", transition: "background 0.15s" }}
+                onMouseEnter={e => e.currentTarget.style.background = T.bg3}
+                onMouseLeave={e => e.currentTarget.style.background = T.bg1}>
+                <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: v.kleur, lineHeight: 1 }}>{v.sym}</div>
+                <div style={{ fontSize: 10, color: T.textMuted, marginTop: 3, lineHeight: 1.3 }}>{v.naam}</div>
+                <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>{v.eenheid}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Snelle acties */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+          <button onClick={() => { setTab("naslag"); setNaslagTab("snijdata"); }}
+            style={{ ...S.card, cursor: "pointer", textAlign: "left", border: `1px solid ${T.border}`, transition: "border-color 0.15s", margin: 0 }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = T.accent}
+            onMouseLeave={e => e.currentTarget.style.borderColor = T.border}>
+            <div style={{ fontFamily: T.mono, fontSize: 22, color: T.accent, marginBottom: 4 }}>≡</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.white }}>Snijdata</div>
+            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>Materiaal opzoeken</div>
+          </button>
+          <button onClick={() => { setTab("naslag"); setNaslagTab("opspannen"); }}
+            style={{ ...S.card, cursor: "pointer", textAlign: "left", border: `1px solid ${T.border}`, transition: "border-color 0.15s", margin: 0 }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = T.green}
+            onMouseLeave={e => e.currentTarget.style.borderColor = T.border}>
+            <div style={{ fontFamily: T.mono, fontSize: 22, color: T.green, marginBottom: 4 }}>⊟</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.white }}>Opspannen</div>
+            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>Stap-voor-stap</div>
+          </button>
+          <button onClick={() => setTab("rekenmachine")}
+            style={{ ...S.card, cursor: "pointer", textAlign: "left", border: `1px solid ${T.border}`, transition: "border-color 0.15s", margin: 0 }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = T.blue}
+            onMouseLeave={e => e.currentTarget.style.borderColor = T.border}>
+            <div style={{ fontFamily: T.mono, fontSize: 22, color: T.blue, marginBottom: 4 }}>⊕</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.white }}>Rekenmachine</div>
+            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>n, vf, Q berekenen</div>
+          </button>
+          <button onClick={() => setTab("diagnose")}
+            style={{ ...S.card, cursor: "pointer", textAlign: "left", border: `1px solid ${T.border}`, transition: "border-color 0.15s", margin: 0 }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = T.red}
+            onMouseLeave={e => e.currentTarget.style.borderColor = T.border}>
+            <div style={{ fontFamily: T.mono, fontSize: 22, color: T.red, marginBottom: 4 }}>◉</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.white }}>Diagnose</div>
+            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>Probleem oplossen</div>
+          </button>
+        </div>
+
+        {/* Bezig met */}
+        {openOpdrachten.length > 0 && (
+          <div style={{ ...S.card }}>
+            <div style={{ ...S.label, marginBottom: 10 }}>VERDER WAAR JE GEBLEVEN WAS</div>
+            {openOpdrachten.map(o => {
+              const log = logboek[o.id] || {};
+              const filled = o.stappen.filter((_, i) => log[i] && log[i].trim()).length;
+              const pct = Math.round((filled / o.stappen.length) * 100);
+              return (
+                <button key={o.id} onClick={() => { setTab("opdrachten"); setSelOpdracht(o); }}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", background: T.bg1, border: "none", borderRadius: T.r, padding: "10px 12px", marginBottom: 6, cursor: "pointer", transition: "background 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = T.bg3}
+                  onMouseLeave={e => e.currentTarget.style.background = T.bg1}>
+                  <div style={{ textAlign: "left" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: T.white }}>{o.titel}</div>
+                    <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>{o.proces} · {pct}% gedaan</div>
+                  </div>
+                  <span style={{ color: T.accent, fontFamily: T.mono, fontSize: 16 }}>→</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ====== TAB: OPDRACHTEN ======
@@ -748,7 +1043,7 @@ function App() {
   const renderNaslag = () => (
     <div style={{ padding: "12px 0" }}>
       <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-        {[{ k: "formules", l: "Formules" }, { k: "params", l: "Parameters" }, { k: "materialen", l: "Materialen" }, { k: "toleranties", l: "Toleranties" }, { k: "gcode", l: "G-code" }].map(f => (
+        {[{ k: "variabelen", l: "Variabelen" }, { k: "snijdata", l: "Snijdata" }, { k: "opspannen", l: "Opspannen" }, { k: "formules", l: "Formules" }, { k: "materialen", l: "Materialen" }, { k: "toleranties", l: "Toleranties" }, { k: "gcode", l: "G-code" }].map(f => (
           <button key={f.k} onClick={() => setNaslagTab(f.k)}
             style={{ padding: "5px 14px", borderRadius: 14, border: `1px solid ${naslagTab === f.k ? T.accent : T.border}`, background: naslagTab === f.k ? T.accentDim + "30" : "none", color: naslagTab === f.k ? T.accent : T.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
             {f.l}
@@ -756,6 +1051,212 @@ function App() {
         ))}
       </div>
 
+      {/* ===== VARIABELEN ENCYCLOPEDIE ===== */}
+      {naslagTab === "variabelen" && (
+        <div className="anim-stagger">
+          <p style={{ color: T.textMuted, fontSize: 12, margin: "0 0 12px", lineHeight: 1.5 }}>
+            Klik op een variabele voor de volledige uitleg, formule en praktijktips.
+          </p>
+          {VARIABELEN.map((cat, ci) => (
+            <div key={ci} style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, padding: "0 2px" }}>
+                <div style={{ width: 3, height: 14, background: cat.kleur, borderRadius: 2 }} />
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: cat.kleur, fontFamily: T.mono }}>{cat.cat}</span>
+              </div>
+              {cat.items.map((v, vi) => {
+                const key = `${ci}-${vi}`;
+                const open = varOpen === key;
+                return (
+                  <div key={vi} style={{ marginBottom: 4 }}>
+                    <button onClick={() => setVarOpen(open ? null : key)}
+                      style={{ width: "100%", textAlign: "left", background: open ? T.bg3 : T.bg2, border: `1px solid ${open ? cat.kleur : T.border}`, borderRadius: open ? `${T.r}px ${T.r}px 0 0` : T.r, padding: "10px 14px", cursor: "pointer", transition: "all 0.15s", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <span style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800, color: cat.kleur, minWidth: 48 }}>{v.sym}</span>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: T.white }}>{v.naam}</div>
+                          <div style={{ fontSize: 10, color: T.textMuted, fontFamily: T.mono }}>{v.eenheid}</div>
+                        </div>
+                      </div>
+                      <span style={{ color: T.textDim, fontFamily: T.mono, fontSize: 16, transition: "transform 0.2s", display: "inline-block", transform: open ? "rotate(90deg)" : "none" }}>›</span>
+                    </button>
+                    {open && (
+                      <div className="anim-fade-in" style={{ background: T.bg1, border: `1px solid ${cat.kleur}`, borderTop: "none", borderRadius: `0 0 ${T.r}px ${T.r}px`, padding: "12px 14px" }}>
+                        {/* Formule */}
+                        <div style={{ background: T.bg0, borderRadius: T.r, padding: "8px 12px", marginBottom: 10, fontFamily: T.mono, fontSize: 12, color: cat.kleur, borderLeft: `2px solid ${cat.kleur}` }}>
+                          {v.formule}
+                        </div>
+                        {/* Uitleg */}
+                        <p style={{ color: T.text, fontSize: 12, lineHeight: 1.6, margin: "0 0 10px" }}>{v.uitleg}</p>
+                        {/* Groter / Kleiner */}
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
+                          <div style={{ background: T.green + "12", borderRadius: T.r, padding: "8px 10px", borderLeft: `2px solid ${T.green}` }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: T.green, letterSpacing: 1, marginBottom: 3 }}>GROTER ↑</div>
+                            <div style={{ fontSize: 11, color: T.text, lineHeight: 1.4 }}>{v.groter}</div>
+                          </div>
+                          <div style={{ background: T.red + "12", borderRadius: T.r, padding: "8px 10px", borderLeft: `2px solid ${T.red}` }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: T.red, letterSpacing: 1, marginBottom: 3 }}>KLEINER ↓</div>
+                            <div style={{ fontSize: 11, color: T.text, lineHeight: 1.4 }}>{v.kleiner}</div>
+                          </div>
+                        </div>
+                        {/* Tip */}
+                        <div style={{ background: T.accent + "12", borderRadius: T.r, padding: "8px 10px", borderLeft: `2px solid ${T.accent}` }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, color: T.accent, letterSpacing: 1, marginBottom: 3 }}>PRAKTIJKTIP</div>
+                          <div style={{ fontSize: 11, color: T.text, lineHeight: 1.4 }}>{v.tip}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ===== SNIJDATA OPZOEKTABEL ===== */}
+      {naslagTab === "snijdata" && (() => {
+        const mat = SNIJDATA.find(m => m.iso === snijMateriaal) || SNIJDATA[0];
+        const data = mat[snijBewerking] || {};
+        const isDraaien = snijBewerking.startsWith("draaien");
+        return (
+          <div className="anim-fade-up">
+            <p style={{ color: T.textMuted, fontSize: 12, margin: "0 0 12px", lineHeight: 1.5 }}>
+              Kies materiaal en bewerking → lees direct de aanbevolen waarden af.
+            </p>
+            {/* Materiaal kiezer */}
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ ...S.label, marginBottom: 6 }}>MATERIAAL</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+                {SNIJDATA.map(m => (
+                  <button key={m.iso} onClick={() => setSnijMateriaal(m.iso)}
+                    style={{ padding: "8px 6px", borderRadius: T.r, border: `2px solid ${snijMateriaal === m.iso ? m.kleur : T.border}`, background: snijMateriaal === m.iso ? m.kleur + "18" : T.bg2, cursor: "pointer", transition: "all 0.15s", textAlign: "center" }}>
+                    <div style={{ fontFamily: T.mono, fontWeight: 800, fontSize: 14, color: m.kleur }}>ISO {m.iso}</div>
+                    <div style={{ fontSize: 9, color: T.textMuted, marginTop: 2 }}>{m.naam.split(" ")[0]}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Bewerking kiezer */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ ...S.label, marginBottom: 6 }}>BEWERKING</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                {[
+                  { k: "draaien_ruwen", l: "Draaien — Ruwen", icon: "◎" },
+                  { k: "draaien_finish", l: "Draaien — Finish", icon: "◯" },
+                  { k: "frezen_ruwen",   l: "Frezen — Ruwen",  icon: "⊕" },
+                  { k: "frezen_finish",  l: "Frezen — Finish", icon: "○" },
+                ].map(b => (
+                  <button key={b.k} onClick={() => setSnijBewerking(b.k)}
+                    style={{ padding: "8px 10px", borderRadius: T.r, border: `1px solid ${snijBewerking === b.k ? T.accent : T.border}`, background: snijBewerking === b.k ? T.accentDim + "25" : T.bg2, color: snijBewerking === b.k ? T.accent : T.textMuted, cursor: "pointer", textAlign: "left", fontSize: 12, fontWeight: 600, transition: "all 0.15s" }}>
+                    <span style={{ fontFamily: T.mono, marginRight: 6 }}>{b.icon}</span>{b.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Resultaat tabel */}
+            <div style={{ ...S.card, borderLeft: `3px solid ${mat.kleur}`, padding: "14px 16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div>
+                  <span style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: mat.kleur }}>ISO {mat.iso}</span>
+                  <span style={{ color: T.textMuted, fontSize: 12, marginLeft: 8 }}>{mat.naam}</span>
+                </div>
+                <span style={{ fontSize: 10, color: T.textMuted, background: T.bg1, padding: "3px 8px", borderRadius: 10, fontFamily: T.mono }}>{snijBewerking.replace("_", " ")}</span>
+              </div>
+              {/* Waarden grid */}
+              <div style={{ display: "grid", gridTemplateColumns: isDraaien ? "1fr 1fr 1fr" : "1fr 1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
+                {[
+                  { label: "vc", value: data.vc, unit: "m/min", kleur: "#5a7fa8" },
+                  isDraaien
+                    ? { label: "fn", value: data.fn, unit: "mm/omw", kleur: "#5a9e6f" }
+                    : { label: "fz", value: data.fz, unit: "mm/tand", kleur: "#5a9e6f" },
+                  { label: "ap", value: data.ap, unit: "mm", kleur: "#c8965a" },
+                  ...(!isDraaien ? [{ label: "ae", value: data.ae, unit: "", kleur: "#c8965a" }] : []),
+                ].map((row, i) => (
+                  <div key={i} style={{ background: T.bg1, borderRadius: T.r, padding: "10px 8px", textAlign: "center", borderTop: `2px solid ${row.kleur}` }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 11, color: row.kleur, fontWeight: 700, marginBottom: 4 }}>{row.label}</div>
+                    <div style={{ fontFamily: T.mono, fontSize: 13, color: T.white, fontWeight: 800, lineHeight: 1.2 }}>{row.value}</div>
+                    <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>{row.unit}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Koeling & tip */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 6 }}>
+                <div style={{ background: T.blue + "15", borderRadius: T.r, padding: "8px 10px", borderLeft: `2px solid ${T.blue}` }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: T.blue, letterSpacing: 1, marginBottom: 3 }}>KOELING</div>
+                  <div style={{ fontSize: 11, color: T.text }}>{data.koel}</div>
+                </div>
+                <div style={{ background: T.accent + "12", borderRadius: T.r, padding: "8px 10px", borderLeft: `2px solid ${T.accent}` }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: T.accent, letterSpacing: 1, marginBottom: 3 }}>TIP</div>
+                  <div style={{ fontSize: 11, color: T.text, lineHeight: 1.4 }}>{data.tip}</div>
+                </div>
+              </div>
+            </div>
+            {/* Disclaimer */}
+            <div style={{ padding: "8px 12px", color: T.textDim, fontSize: 10, lineHeight: 1.5 }}>
+              Waarden zijn richtlijnen voor carbide gereedschap. Altijd fabrikantadvies raadplegen en beginnen aan de onderkant van het bereik.
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ===== OPSPANWIJZER ===== */}
+      {naslagTab === "opspannen" && (
+        <div className="anim-fade-up">
+          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            {["draaien", "frezen"].map(p => (
+              <button key={p} onClick={() => { setOpspanProces(p); setOpspanOpen(null); }}
+                style={{ ...S.btn(opspanProces === p), flex: 1, fontSize: 12 }}>
+                {p === "draaien" ? "Draaien" : "Frezen"}
+              </button>
+            ))}
+          </div>
+          <div className="anim-stagger">
+            {(OPSPANWIJZER[opspanProces] || []).map((m, mi) => {
+              const open = opspanOpen === mi;
+              return (
+                <div key={mi} style={{ marginBottom: 4 }}>
+                  <button onClick={() => setOpspanOpen(open ? null : mi)}
+                    style={{ width: "100%", textAlign: "left", background: open ? T.bg3 : T.bg2, border: `1px solid ${open ? m.kleur : T.border}`, borderRadius: open ? `${T.r}px ${T.r}px 0 0` : T.r, padding: "12px 14px", cursor: "pointer", transition: "all 0.15s", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <span style={{ fontFamily: T.mono, fontSize: 18, color: m.kleur }}>{m.icon}</span>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.white }}>{m.titel}</div>
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 1 }}>{m.wanneer}</div>
+                      </div>
+                    </div>
+                    <span style={{ color: T.textDim, fontFamily: T.mono, fontSize: 16, transition: "transform 0.2s", display: "inline-block", transform: open ? "rotate(90deg)" : "none" }}>›</span>
+                  </button>
+                  {open && (
+                    <div className="anim-fade-in" style={{ background: T.bg1, border: `1px solid ${m.kleur}`, borderTop: "none", borderRadius: `0 0 ${T.r}px ${T.r}px`, padding: "14px" }}>
+                      {/* Checklist */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ ...S.label, color: T.green, marginBottom: 8 }}>STAP-VOOR-STAP CHECKLIST</div>
+                        {m.stappen.map((s, si) => (
+                          <div key={si} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "5px 0", borderBottom: `1px solid ${T.bg2}` }}>
+                            <div style={{ minWidth: 20, height: 20, borderRadius: "50%", background: m.kleur + "25", border: `1px solid ${m.kleur}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: T.mono, fontSize: 10, color: m.kleur, fontWeight: 700, flexShrink: 0 }}>{si + 1}</div>
+                            <div style={{ fontSize: 12, color: T.text, lineHeight: 1.5, paddingTop: 2 }}>{s}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Gevaren */}
+                      <div style={{ background: T.red + "10", borderRadius: T.r, padding: "10px 12px", borderLeft: `2px solid ${T.red}` }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: T.red, letterSpacing: 1, marginBottom: 6 }}>VEELGEMAAKTE FOUTEN</div>
+                        {m.gevaren.map((g, gi) => (
+                          <div key={gi} style={{ fontSize: 11, color: T.text, lineHeight: 1.5, padding: "2px 0", paddingLeft: 12, position: "relative" }}>
+                            <span style={{ position: "absolute", left: 0, color: T.red }}>!</span>{g}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ===== BESTAANDE SUB-TABS ===== */}
       {naslagTab === "formules" && (
         <>
           {[{ proc: "DRAAIEN", formules: [
@@ -799,35 +1300,6 @@ function App() {
             ))}
           </div>
         </>
-      )}
-
-      {naslagTab === "params" && (
-        <div>
-          {[
-            { sym: "vc", naam: "Snijsnelheid", eenheid: "m/min", omhoog: "meer hitte, productiviteit, andere slijtage", omlaag: "wrijven, BUE, werkverharding" },
-            { sym: "n", naam: "Toerental", eenheid: "omw/min", omhoog: "hogere vc bij zelfde Dm", omlaag: "lagere vc" },
-            { sym: "fn", naam: "Voeding/omw", eenheid: "mm/omw", omhoog: "dikkere spaan, meer kracht, betere spaanbreuk", omlaag: "wrijven, lange spanen" },
-            { sym: "fz", naam: "Voeding/tand", eenheid: "mm/tand", omhoog: "meer per tand, productief", omlaag: "dunne spaan, wrijven" },
-            { sym: "ap", naam: "Snedediepte", eenheid: "mm", omhoog: "meer MRR, meer kracht", omlaag: "wrijven als < ⅔ rε" },
-            { sym: "ae", naam: "Radiale insnijding", eenheid: "mm", omhoog: "meer contact, kracht, warmte", omlaag: "dunne spaan" },
-            { sym: "rε", naam: "Neusradius", eenheid: "mm", omhoog: "sterkere kant, betere finish (als stabiel)", omlaag: "minder radiale kracht" },
-            { sym: "kr", naam: "Instelhoek", eenheid: "°", omhoog: "90°: meer radiaal", omlaag: "45°/10°: meer axiaal" },
-            { sym: "l/D", naam: "Uitsteeklengte", eenheid: "—", omhoog: "exponentieel meer buiging (L³!)", omlaag: "stabieler" },
-            { sym: "kc", naam: "Spec. snijkracht", eenheid: "N/mm²", omhoog: "harder materiaal, meer vermogen nodig", omlaag: "zachter materiaal" },
-          ].map(p => (
-            <div key={p.sym} style={S.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                <span style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: T.accent }}>{p.sym}</span>
-                <span style={{ ...S.label }}>{p.eenheid}</span>
-              </div>
-              <div style={{ color: T.white, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{p.naam}</div>
-              <div style={{ fontSize: 11 }}>
-                <span style={{ color: T.green }}>↑ {p.omhoog}</span><br />
-                <span style={{ color: T.red }}>↓ {p.omlaag}</span>
-              </div>
-            </div>
-          ))}
-        </div>
       )}
 
       {naslagTab === "materialen" && (
@@ -1041,11 +1513,12 @@ function App() {
 
   // ====== RENDER ======
   const tabs = [
-    { key: "opdrachten", label: "Opdrachten", icon: "▶" },
-    { key: "rekenmachine", label: "Rekenmachine", icon: "⊕" },
-    { key: "diagnose", label: "Diagnose", icon: "◉" },
-    { key: "naslag", label: "Naslagwerk", icon: "≡" },
-    { key: "logboek", label: "Logboek", icon: "☰" },
+    { key: "thuis",       label: "Thuis",       icon: "⌂" },
+    { key: "opdrachten",  label: "Opdrachten",  icon: "▶" },
+    { key: "rekenmachine",label: "Rekenmachine",icon: "⊕" },
+    { key: "diagnose",    label: "Diagnose",    icon: "◉" },
+    { key: "naslag",      label: "Naslagwerk",  icon: "≡" },
+    { key: "logboek",     label: "Logboek",     icon: "☰" },
   ];
 
   return (
@@ -1053,32 +1526,33 @@ function App() {
       {/* Header */}
       <div style={S.header}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: T.white, letterSpacing: -0.3 }}>
-              <span style={{ color: T.accent }}>Verspaan</span>Meester
-            </div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: T.white, letterSpacing: -0.3 }}>
+            <span style={{ color: T.accent }}>Verspaan</span>Meester
+            <span style={{ fontSize: 9, color: T.textDim, fontFamily: T.mono, fontWeight: 400, marginLeft: 6, letterSpacing: 1 }}>v4</span>
           </div>
-          <div style={{ ...S.label }}>{completedCount}/{OPDRACHTEN.length} opdrachten</div>
+          <div style={{ ...S.label }}>{completedCount}/{OPDRACHTEN.length} afgerond</div>
         </div>
       </div>
 
       {/* Tabs */}
       <div style={S.tabs}>
         {tabs.map(t => (
-          <button key={t.key} onClick={() => { setTab(t.key); if (t.key !== "opdrachten") setSelOpdracht(null); }}
+          <button key={t.key}
+            onClick={() => { setTab(t.key); if (t.key !== "opdrachten") setSelOpdracht(null); }}
             style={S.tab(tab === t.key)}>
             <span style={{ marginRight: 4, fontFamily: T.mono }}>{t.icon}</span>{t.label}
           </button>
         ))}
       </div>
 
-      {/* Content */}
-      <div style={S.content}>
-        {tab === "opdrachten" && renderOpdrachten()}
+      {/* Content — key zorgt voor re-mount en fade-animatie bij tab-wissel */}
+      <div style={S.content} key={tab} className="anim-fade-up">
+        {tab === "thuis"        && renderThuis()}
+        {tab === "opdrachten"   && renderOpdrachten()}
         {tab === "rekenmachine" && renderCalc()}
-        {tab === "diagnose" && renderDiagnose()}
-        {tab === "naslag" && renderNaslag()}
-        {tab === "logboek" && renderLogboek()}
+        {tab === "diagnose"     && renderDiagnose()}
+        {tab === "naslag"       && renderNaslag()}
+        {tab === "logboek"      && renderLogboek()}
       </div>
     </div>
   );
